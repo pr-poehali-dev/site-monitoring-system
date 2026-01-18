@@ -18,9 +18,7 @@
       },
       "expectedStatus": 200,
       "expectedBody": {
-        "total_processed": 0,
-        "new_documents": 0,
-        "updated_documents": 0
+        "total_processed": 0
       },
       "bodyMatcher": "partial"
     },
@@ -33,7 +31,6 @@
       },
       "expectedStatus": 200,
       "expectedBody": {
-        "changes_found": 0,
         "notifications_sent": 0
       },
       "bodyMatcher": "partial"

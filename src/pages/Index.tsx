@@ -21,6 +21,7 @@ const Index = () => {
   const [stats, setStats] = useState({ total_documents: 0, changes_this_week: 0, active_sections: 0 });
   const [settings, setSettings] = useState<any>({});
   const [loading, setLoading] = useState(false);
+  const [telegramChatId, setTelegramChatId] = useState('');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -42,8 +43,26 @@ const Index = () => {
       setChanges(changesData.changes || []);
       setLogs(logsData.logs || []);
       setSettings(settingsData.settings || {});
+      setTelegramChatId(settingsData.settings?.telegram_chat_id || '');
     } catch (error) {
       console.error('Failed to load data:', error);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      await apiClient.updateSettings({ telegram_chat_id: telegramChatId });
+      toast({
+        title: 'Настройки сохранены',
+        description: `Telegram Chat ID: ${telegramChatId}`
+      });
+      await loadAllData();
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось сохранить настройки',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -369,9 +388,12 @@ const Index = () => {
                       <Label htmlFor="telegram-chat">Telegram Chat ID</Label>
                       <Input 
                         id="telegram-chat" 
-                        placeholder="-1001234567890" 
+                        placeholder="3642302397" 
                         className="font-mono"
+                        value={telegramChatId}
+                        onChange={(e) => setTelegramChatId(e.target.value)}
                       />
+                      <p className="text-xs text-gray-500">Ваш Chat ID: {telegramChatId || 'не указан'}</p>
                     </div>
                   </div>
                 </div>
@@ -395,7 +417,7 @@ const Index = () => {
                 </div>
 
                 <div className="flex gap-3 pt-4">
-                  <Button className="flex-1">
+                  <Button className="flex-1" onClick={handleSaveSettings}>
                     <Icon name="Save" size={16} className="mr-2" />
                     Сохранить настройки
                   </Button>
