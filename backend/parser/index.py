@@ -258,6 +258,10 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         if delay > MAX_DELAY:
             delay = MAX_DELAY
         
+        # Для старых годов (2009-2015) минимальная задержка
+        if year <= 2015:
+            delay = 0.5
+        
         while page <= MAX_PAGES_PER_RUN and stats['docs_processed'] < MAX_DOCS_PER_RUN:
             url = base_section_url if page == 1 else urljoin(base_section_url, f"page/{page}/")
             
@@ -309,12 +313,15 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                     # Определяем формат документа (новый блочный или старый табличный)
                     is_table_row = item.name == 'tr'
                     
+                    # Для старых годов (2009-2015) отключаем загрузку в S3 для ускорения
+                    skip_s3 = year <= 2015
+                    
                     if is_table_row:
                         res = process_doc_table(cursor, schema, item, section, section_name, 
-                                        base_url, url, s3, aws_key, headers, year)
+                                        base_url, url, None if skip_s3 else s3, aws_key, headers, year)
                     else:
                         res = process_doc(cursor, schema, item, section, section_name, 
-                                        base_url, url, s3, aws_key, headers)
+                                        base_url, url, None if skip_s3 else s3, aws_key, headers)
                     stats['docs_processed'] += 1
                     
                     if res == 'new':
@@ -475,20 +482,24 @@ def process_doc_table(cursor, schema, row, section, section_name, base_url, page
     fpath = ''
     cdn_url = ''
     
-    try:
-        fr = requests.get(file_url, headers=headers, timeout=8)
-        fc = fr.content
-        fsize = len(fc)
-        fhash = hashlib.sha256(fc).hexdigest()
-        
-        if s3 and fsize > 0 and aws_key:
-            fext = file_url.split('.')[-1].lower() if '.' in file_url else 'bin'
-            fname_part = f"{doc_num or 'unk'}_main_{fhash[:8]}"
-            fpath = f'docs/{section}/{fname_part}.{fext}'
-            s3.put_object(Bucket='files', Key=fpath, Body=fc, ContentType=get_ctype(fext))
-            cdn_url = f'https://cdn.poehali.dev/projects/{aws_key}/bucket/{fpath}'
-    except Exception:
+    # Если S3 отключен (для ускорения старых годов), используем URL как хеш
+    if not s3:
         fhash = hashlib.sha256(file_url.encode()).hexdigest()
+    else:
+        try:
+            fr = requests.get(file_url, headers=headers, timeout=8)
+            fc = fr.content
+            fsize = len(fc)
+            fhash = hashlib.sha256(fc).hexdigest()
+            
+            if fsize > 0 and aws_key:
+                fext = file_url.split('.')[-1].lower() if '.' in file_url else 'bin'
+                fname_part = f"{doc_num or 'unk'}_main_{fhash[:8]}"
+                fpath = f'docs/{section}/{fname_part}.{fext}'
+                s3.put_object(Bucket='files', Key=fpath, Body=fc, ContentType=get_ctype(fext))
+                cdn_url = f'https://cdn.poehali.dev/projects/{aws_key}/bucket/{fpath}'
+        except Exception:
+            fhash = hashlib.sha256(file_url.encode()).hexdigest()
     
     # Извлекаем имя файла из ссылки
     file_name = file_url.split('/')[-1] if '/' in file_url else 'document'
