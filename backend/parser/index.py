@@ -35,7 +35,8 @@ def handler(event: dict, context) -> dict:
         conn.autocommit = False
         
         if method == 'POST':
-            body = json.loads(event.get('body', '{}'))
+            body_raw = event.get('body') or '{}'
+            body = json.loads(body_raw) if body_raw else {}
             action = body.get('action', 'parse')
             
             if action == 'parse':
