@@ -124,6 +124,27 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
     
     documents = cursor.fetchall()
     
+    doc_ids = [d['id'] for d in documents]
+    if doc_ids:
+        placeholders = ','.join(['%s'] * len(doc_ids))
+        cursor.execute(f"""
+            SELECT document_id, file_url, file_type, file_name, file_size, 
+                   file_cdn_url, content_hash
+            FROM {schema}.document_files
+            WHERE document_id IN ({placeholders})
+            ORDER BY document_id, CASE WHEN file_type = 'main' THEN 0 ELSE 1 END
+        """, doc_ids)
+        
+        files_by_doc = {}
+        for f in cursor.fetchall():
+            did = f['document_id']
+            if did not in files_by_doc:
+                files_by_doc[did] = []
+            files_by_doc[did].append(f)
+        
+        for doc in documents:
+            doc['files'] = files_by_doc.get(doc['id'], [])
+    
     cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.documents WHERE {where_sql}", query_params)
     total = cursor.fetchone()['total']
     

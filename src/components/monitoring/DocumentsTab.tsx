@@ -161,15 +161,40 @@ const DocumentsTab = ({
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" asChild>
-                      <a 
-                        href={doc.file_cdn_url || doc.url} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                      >
-                        <Icon name="Download" size={16} />
-                      </a>
-                    </Button>
+                    {doc.files && doc.files.length > 0 ? (
+                      <div className="flex flex-col gap-1">
+                        {doc.files.map((file: any, idx: number) => (
+                          <Button 
+                            key={idx} 
+                            variant={file.file_type === 'main' ? 'default' : 'outline'} 
+                            size="sm" 
+                            asChild
+                          >
+                            <a 
+                              href={file.file_cdn_url || file.file_url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              title={file.file_name}
+                            >
+                              <Icon name="Download" size={14} />
+                              {file.file_type === 'appendix' && (
+                                <span className="ml-1 text-xs">Прил.</span>
+                              )}
+                            </a>
+                          </Button>
+                        ))}
+                      </div>
+                    ) : (
+                      <Button variant="ghost" size="sm" asChild>
+                        <a 
+                          href={doc.file_cdn_url || doc.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                        >
+                          <Icon name="Download" size={16} />
+                        </a>
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

@@ -11,9 +11,10 @@ from psycopg2.extras import RealDictCursor
 import boto3
 
 MAX_RETRY = 3
-MAX_DOCS_PER_RUN = 30
-INITIAL_DELAY = 1.0
-MAX_DELAY = 10.0
+MAX_DOCS_PER_RUN = 100
+MAX_PAGES_PER_RUN = 30
+INITIAL_DELAY = 0.5
+MAX_DELAY = 5.0
 
 def handler(event: dict, context) -> dict:
     """API для парсинга документов с умными повторными попытками"""
@@ -211,7 +212,7 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         if delay > MAX_DELAY:
             delay = MAX_DELAY
         
-        while page <= 10 and stats['docs_processed'] < MAX_DOCS_PER_RUN:
+        while page <= MAX_PAGES_PER_RUN and stats['docs_processed'] < MAX_DOCS_PER_RUN:
             url = base_section_url if page == 1 else urljoin(base_section_url, f"page/{page}/")
             
             log_create(cursor, schema, section, 'info', 
@@ -338,7 +339,7 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
 
 
 def process_doc(cursor, schema, item, section, section_name, base_url, page_url, s3, aws_key, headers):
-    """Обработка документа с сохранением в S3"""
+    """Обработка документа с сохранением в S3 (поддержка множественных файлов)"""
     te = item.find('a', class_='docs__title')
     if not te:
         return 'skip'
@@ -359,48 +360,79 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
             if len(p) == 3:
                 pub_date = f"{p[2]}-{p[1]}-{p[0]}"
     
-    fw = item.find('div', class_='docs__file-link-wrapper')
-    if fw:
+    doc_url = urljoin(page_url, te.get('href', ''))
+    
+    file_wrappers = item.find_all('div', class_='docs__file')
+    all_files = []
+    
+    for idx, fw in enumerate(file_wrappers):
         fl = fw.find('a', attrs={'download': True})
-        file_url = urljoin(base_url, fl.get('href', '')) if fl else urljoin(page_url, te.get('href', ''))
-    else:
-        file_url = urljoin(page_url, te.get('href', ''))
-    
-    fsize = 0
-    fhash = ''
-    fpath = ''
-    cdn_url = ''
-    
-    try:
-        fr = requests.get(file_url, headers=headers, timeout=8)
-        fc = fr.content
-        fsize = len(fc)
-        fhash = hashlib.sha256(fc).hexdigest()
+        if not fl:
+            continue
         
-        if s3 and fsize > 0 and aws_key:
-            fext = file_url.split('.')[-1].lower() if '.' in file_url else 'bin'
-            fpath = f'docs/{section}/{doc_num or "unk"}_{fhash[:8]}.{fext}'
-            s3.put_object(Bucket='files', Key=fpath, Body=fc, ContentType=get_ctype(fext))
-            cdn_url = f'https://cdn.poehali.dev/projects/{aws_key}/bucket/{fpath}'
-    except Exception:
-        fhash = hashlib.sha256(file_url.encode()).hexdigest()
+        file_url = urljoin(base_url, fl.get('href', ''))
+        file_name = fl.get_text(strip=True)
+        file_type = 'main' if idx == 0 else 'appendix'
+        
+        fsize = 0
+        fhash = ''
+        fpath = ''
+        cdn_url = ''
+        
+        try:
+            fr = requests.get(file_url, headers=headers, timeout=8)
+            fc = fr.content
+            fsize = len(fc)
+            fhash = hashlib.sha256(fc).hexdigest()
+            
+            if s3 and fsize > 0 and aws_key:
+                fext = file_url.split('.')[-1].lower() if '.' in file_url else 'bin'
+                fname_part = f"{doc_num or 'unk'}_{file_type}_{fhash[:8]}"
+                fpath = f'docs/{section}/{fname_part}.{fext}'
+                s3.put_object(Bucket='files', Key=fpath, Body=fc, ContentType=get_ctype(fext))
+                cdn_url = f'https://cdn.poehali.dev/projects/{aws_key}/bucket/{fpath}'
+        except Exception:
+            fhash = hashlib.sha256(file_url.encode()).hexdigest()
+        
+        all_files.append({
+            'url': file_url,
+            'name': file_name,
+            'type': file_type,
+            'size': fsize,
+            'hash': fhash,
+            'path': fpath,
+            'cdn_url': cdn_url
+        })
+    
+    if not all_files:
+        return 'skip'
+    
+    main_file = all_files[0]
     
     cursor.execute(
         f"SELECT id, content_hash, title, file_size, changes_count FROM {schema}.documents WHERE url = %s",
-        (file_url,)
+        (doc_url,)
     )
     ex = cursor.fetchone()
     
     if ex:
-        if ex['content_hash'] != fhash or ex['file_size'] != fsize:
+        if ex['content_hash'] != main_file['hash'] or ex['file_size'] != main_file['size']:
             cursor.execute(
                 f"UPDATE {schema}.documents SET content_hash = %s, title = %s, file_size = %s, file_path = %s, file_cdn_url = %s, updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, changes_count = changes_count + 1 WHERE id = %s",
-                (fhash, full_title, fsize, fpath, cdn_url, ex['id'])
+                (main_file['hash'], full_title, main_file['size'], main_file['path'], main_file['cdn_url'], ex['id'])
             )
             cursor.execute(
                 f"INSERT INTO {schema}.document_changes (document_id, change_type, old_content_hash, new_content_hash, old_title, new_title, old_file_size, new_file_size) VALUES (%s, 'modified', %s, %s, %s, %s, %s, %s)",
-                (ex['id'], ex['content_hash'], fhash, ex['title'], full_title, ex['file_size'], fsize)
+                (ex['id'], ex['content_hash'], main_file['hash'], ex['title'], full_title, ex['file_size'], main_file['size'])
             )
+            
+            cursor.execute(f"DELETE FROM {schema}.document_files WHERE document_id = %s", (ex['id'],))
+            for f in all_files:
+                cursor.execute(
+                    f"INSERT INTO {schema}.document_files (document_id, file_url, file_type, file_name, file_size, file_path, file_cdn_url, content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (ex['id'], f['url'], f['type'], f['name'], f['size'], f['path'], f['cdn_url'], f['hash'])
+                )
+            
             return 'upd'
         else:
             cursor.execute(
@@ -411,9 +443,16 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
     else:
         cursor.execute(
             f"INSERT INTO {schema}.documents (title, url, section, published_date, document_number, document_date, content_hash, file_size, file_path, file_cdn_url, changes_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0) RETURNING id",
-            (full_title, file_url, section_name, pub_date, doc_num, doc_date, fhash, fsize, fpath, cdn_url)
+            (full_title, doc_url, section_name, pub_date, doc_num, doc_date, main_file['hash'], main_file['size'], main_file['path'], main_file['cdn_url'])
         )
-        cursor.fetchone()['id']
+        did = cursor.fetchone()['id']
+        
+        for f in all_files:
+            cursor.execute(
+                f"INSERT INTO {schema}.document_files (document_id, file_url, file_type, file_name, file_size, file_path, file_cdn_url, content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (did, f['url'], f['type'], f['name'], f['size'], f['path'], f['cdn_url'], f['hash'])
+            )
+        
         return 'new'
 
 
