@@ -509,8 +509,10 @@ def process_doc_table(cursor, schema, row, section, section_name, base_url, page
     if not title:
         title = f"Документ №{doc_num} от {doc_date_text}"
     
-    # URL документа = URL файла (в старом формате нет отдельной страницы)
-    doc_url = file_url
+    # URL документа = URL файла + уникальный идентификатор
+    # (в старом формате один файл может использоваться для разных документов)
+    unique_id = f"{file_url}#{doc_num}#{doc_date or 'nodate'}"
+    doc_url = unique_id
     
     # Обрабатываем файл
     all_files = []
