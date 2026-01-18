@@ -79,9 +79,12 @@ def handler(event: dict, context) -> dict:
 
 
 def get_documents(cursor, schema: str, params: dict) -> dict:
-    """Получение списка документов с фильтрацией"""
+    """Получение списка документов с фильтрацией и сортировкой"""
     search = params.get('search', '')
     section = params.get('section', '')
+    year = params.get('year', '')
+    sort_by = params.get('sort_by', 'created_at')
+    sort_order = params.get('sort_order', 'DESC')
     limit = int(params.get('limit', '100'))
     offset = int(params.get('offset', '0'))
     
@@ -96,13 +99,26 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
         where_clauses.append("section = %s")
         query_params.append(section)
     
+    if year:
+        where_clauses.append("EXTRACT(YEAR FROM COALESCE(document_date, published_date, created_at)) = %s")
+        query_params.append(int(year))
+    
     where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
     
+    allowed_sorts = ['created_at', 'document_date', 'published_date', 'title', 'changes_count', 'file_size']
+    if sort_by not in allowed_sorts:
+        sort_by = 'created_at'
+    if sort_order.upper() not in ['ASC', 'DESC']:
+        sort_order = 'DESC'
+    
+    order_sql = f"ORDER BY {sort_by} {sort_order} NULLS LAST"
+    
     cursor.execute(f"""
-        SELECT id, title, url, section, published_date, last_checked_at, created_at
+        SELECT id, title, url, section, published_date, document_date, document_number, 
+               file_size, file_cdn_url, changes_count, last_checked_at, created_at
         FROM {schema}.documents
         WHERE {where_sql}
-        ORDER BY published_date DESC
+        {order_sql}
         LIMIT %s OFFSET %s
     """, (*query_params, limit, offset))
     
@@ -120,17 +136,27 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
 
 
 def get_changes(cursor, schema: str, params: dict) -> dict:
-    """Получение истории изменений"""
+    """Получение истории изменений с фильтрацией по документу"""
     limit = int(params.get('limit', '50'))
+    doc_id = params.get('document_id', '')
+    
+    where_clause = ""
+    query_params = []
+    
+    if doc_id:
+        where_clause = "WHERE dc.document_id = %s"
+        query_params.append(int(doc_id))
     
     cursor.execute(f"""
         SELECT dc.id, dc.change_type, dc.detected_at, dc.notified,
-               d.title, d.url, d.section
+               dc.old_title, dc.new_title, dc.old_file_size, dc.new_file_size,
+               d.title, d.url, d.section, d.file_cdn_url
         FROM {schema}.document_changes dc
         JOIN {schema}.documents d ON dc.document_id = d.id
+        {where_clause}
         ORDER BY dc.detected_at DESC
         LIMIT %s
-    """, (limit,))
+    """, (*query_params, limit))
     
     changes = cursor.fetchall()
     

@@ -15,6 +15,9 @@ import { useToast } from '@/hooks/use-toast';
 const Index = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSection, setSelectedSection] = useState('all');
+  const [selectedYear, setSelectedYear] = useState('all');
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState('DESC');
   const [documents, setDocuments] = useState<any[]>([]);
   const [changes, setChanges] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
@@ -26,9 +29,16 @@ const Index = () => {
   const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
   const { toast } = useToast();
 
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: currentYear - 2008 }, (_, i) => (2009 + i).toString());
+
   useEffect(() => {
     loadAllData();
   }, []);
+
+  useEffect(() => {
+    loadDocuments();
+  }, [searchQuery, selectedSection, selectedYear, sortBy, sortOrder]);
 
   useEffect(() => {
     if (autoRefreshLogs) {
@@ -70,6 +80,22 @@ const Index = () => {
     }
   };
 
+  const loadDocuments = async () => {
+    try {
+      const params: any = { limit: 100 };
+      if (searchQuery) params.search = searchQuery;
+      if (selectedSection !== 'all') params.section = selectedSection;
+      if (selectedYear !== 'all') params.year = selectedYear;
+      params.sort_by = sortBy;
+      params.sort_order = sortOrder;
+
+      const docsData = await apiClient.getDocuments(params);
+      setDocuments(docsData.documents || []);
+    } catch (error) {
+      console.error('Failed to load documents:', error);
+    }
+  };
+
   const handleSaveSettings = async () => {
     try {
       await apiClient.updateSettings({ telegram_chat_id: telegramChatId });
@@ -93,10 +119,7 @@ const Index = () => {
     setAutoRefreshLogs(true);
     
     try {
-      const currentYear = new Date().getFullYear();
-      const years = Array.from({ length: currentYear - 2008 }, (_, i) => 2009 + i);
-      
-      apiClient.runParser(['postanovleniya', 'rasporyazheniya', 'programmy'], years);
+      apiClient.runParser(['postanovleniya', 'rasporyazheniya', 'programmy'], years.map(y => parseInt(y)));
       
       toast({
         title: 'Парсинг запущен в фоне',
@@ -114,11 +137,46 @@ const Index = () => {
     }
   };
 
-  const filteredDocuments = documents.filter(doc => {
-    const matchesSearch = doc.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesSection = selectedSection === 'all' || doc.section === selectedSection;
-    return matchesSearch && matchesSection;
-  });
+  const formatFileSize = (bytes: number) => {
+    if (!bytes) return '-';
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} КБ`;
+    return `${(kb / 1024).toFixed(1)} МБ`;
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleDateString('ru-RU', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric' 
+    });
+  };
+
+  const formatDateTime = (dateStr: string) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'DESC' ? 'ASC' : 'DESC');
+    } else {
+      setSortBy(field);
+      setSortOrder('DESC');
+    }
+  };
+
+  const getSortIcon = (field: string) => {
+    if (sortBy !== field) return null;
+    return sortOrder === 'DESC' ? '↓' : '↑';
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -201,57 +259,117 @@ const Index = () => {
                 <CardDescription>Все отслеживаемые документы с метаданными</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex gap-4">
-                  <div className="flex-1">
+                <div className="flex gap-4 flex-wrap">
+                  <div className="flex-1 min-w-[200px]">
                     <Input
-                      placeholder="Поиск по названию документа..."
+                      placeholder="Поиск по названию..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="w-full"
                     />
                   </div>
                   <Select value={selectedSection} onValueChange={setSelectedSection}>
-                    <SelectTrigger className="w-[240px]">
+                    <SelectTrigger className="w-[200px]">
                       <SelectValue placeholder="Все разделы" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Все разделы</SelectItem>
                       <SelectItem value="Постановления">Постановления</SelectItem>
                       <SelectItem value="Распоряжения">Распоряжения</SelectItem>
-                      <SelectItem value="Муниципальные программы">Муниципальные программы</SelectItem>
+                      <SelectItem value="Муниципальные программы">Программы</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={selectedYear} onValueChange={setSelectedYear}>
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue placeholder="Все годы" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Все годы</SelectItem>
+                      {years.reverse().map(year => (
+                        <SelectItem key={year} value={year}>{year}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
 
-                <div className="border rounded-lg">
+                <div className="border rounded-lg overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Название</TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-gray-50"
+                          onClick={() => handleSort('title')}
+                        >
+                          Название {getSortIcon('title')}
+                        </TableHead>
                         <TableHead>Раздел</TableHead>
-                        <TableHead>Дата публикации</TableHead>
-                        <TableHead className="text-right">Действия</TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-gray-50"
+                          onClick={() => handleSort('document_date')}
+                        >
+                          Дата документа {getSortIcon('document_date')}
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-gray-50"
+                          onClick={() => handleSort('created_at')}
+                        >
+                          Загружено {getSortIcon('created_at')}
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-gray-50"
+                          onClick={() => handleSort('file_size')}
+                        >
+                          Размер {getSortIcon('file_size')}
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-gray-50 text-center"
+                          onClick={() => handleSort('changes_count')}
+                        >
+                          Изменений {getSortIcon('changes_count')}
+                        </TableHead>
+                        <TableHead className="text-right">Файл</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredDocuments.map((doc) => (
+                      {documents.map((doc) => (
                         <TableRow key={doc.id}>
                           <TableCell>
-                            <div className="space-y-1">
-                              <div className="font-medium text-gray-900">{doc.title}</div>
-                              <div className="text-xs font-mono text-gray-500">{doc.url}</div>
+                            <div className="space-y-1 max-w-md">
+                              <div className="font-medium text-gray-900 text-sm">{doc.title}</div>
+                              {doc.document_number && (
+                                <div className="text-xs text-gray-500">№ {doc.document_number}</div>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="secondary">{doc.section}</Badge>
+                            <Badge variant="secondary" className="text-xs">{doc.section}</Badge>
                           </TableCell>
-                          <TableCell className="text-gray-600">
-                            {doc.published_date ? new Date(doc.published_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-'}
+                          <TableCell className="text-gray-600 text-sm">
+                            {formatDate(doc.document_date)}
+                          </TableCell>
+                          <TableCell className="text-gray-600 text-sm">
+                            {formatDateTime(doc.created_at)}
+                          </TableCell>
+                          <TableCell className="text-gray-600 text-sm">
+                            {formatFileSize(doc.file_size)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {doc.changes_count > 0 ? (
+                              <Badge variant="outline" className="text-xs">
+                                {doc.changes_count}
+                              </Badge>
+                            ) : (
+                              <span className="text-gray-400 text-xs">0</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button variant="ghost" size="sm" asChild>
-                              <a href={doc.url} target="_blank" rel="noopener noreferrer">
-                                <Icon name="ExternalLink" size={16} />
+                              <a 
+                                href={doc.file_cdn_url || doc.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                              >
+                                <Icon name="Download" size={16} />
                               </a>
                             </Button>
                           </TableCell>
@@ -262,7 +380,7 @@ const Index = () => {
                 </div>
 
                 <div className="flex justify-between items-center text-sm text-gray-600">
-                  <div>Показано {filteredDocuments.length} из {documents.length}</div>
+                  <div>Показано документов: {documents.length}</div>
                 </div>
               </CardContent>
             </Card>
@@ -272,7 +390,7 @@ const Index = () => {
             <Card>
               <CardHeader>
                 <CardTitle>История изменений</CardTitle>
-                <CardDescription>Новые и изменённые документы, обнаруженные системой</CardDescription>
+                <CardDescription>Новые и изменённые документы</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -297,17 +415,35 @@ const Index = () => {
                         <div className="flex-1 space-y-2">
                           <div className="flex items-start justify-between">
                             <div>
-                              <div className="font-medium text-gray-900">{change.title}</div>
+                              <div className="font-medium text-gray-900">
+                                {change.change_type === 'new' ? change.new_title : change.title}
+                              </div>
                               <div className="text-sm text-gray-600 mt-1">
                                 <Badge variant="secondary" className="mr-2">{change.section}</Badge>
                                 <span className="text-xs text-gray-500">
-                                  {new Date(change.detected_at).toLocaleString('ru-RU')}
+                                  {formatDateTime(change.detected_at)}
                                 </span>
                               </div>
+                              {change.change_type === 'modified' && (
+                                <div className="text-xs text-gray-500 mt-2">
+                                  {change.old_file_size && change.new_file_size && (
+                                    <div>Размер: {formatFileSize(change.old_file_size)} → {formatFileSize(change.new_file_size)}</div>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                            <Badge variant={change.change_type === 'new' ? 'default' : 'secondary'}>
-                              {change.change_type === 'new' ? 'Новый' : 'Изменён'}
-                            </Badge>
+                            <div className="flex gap-2">
+                              <Badge variant={change.change_type === 'new' ? 'default' : 'secondary'}>
+                                {change.change_type === 'new' ? 'Новый' : 'Изменён'}
+                              </Badge>
+                              {change.file_cdn_url && (
+                                <Button variant="ghost" size="sm" asChild>
+                                  <a href={change.file_cdn_url} target="_blank" rel="noopener noreferrer">
+                                    <Icon name="Download" size={14} />
+                                  </a>
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -324,7 +460,7 @@ const Index = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle>Логи парсинга</CardTitle>
-                    <CardDescription>Подробная информация о работе системы мониторинга</CardDescription>
+                    <CardDescription>Подробная информация о работе системы</CardDescription>
                   </div>
                   <div className="flex items-center gap-3">
                     <Label htmlFor="auto-refresh" className="text-sm cursor-pointer">
@@ -360,14 +496,17 @@ const Index = () => {
                           {log.status === 'error' && (
                             <Icon name="XCircle" size={18} className="text-red-600" />
                           )}
+                          {log.status === 'warning' && (
+                            <Icon name="AlertTriangle" size={18} className="text-orange-600" />
+                          )}
                         </div>
                         <div className="flex-1 space-y-1">
                           <div className="flex items-center gap-3 text-gray-500 text-xs">
-                            <span>{new Date(log.started_at).toLocaleString('ru-RU')}</span>
+                            <span>{formatDateTime(log.started_at)}</span>
                             <span>•</span>
                             <span>{log.duration_ms ? `${log.duration_ms}ms` : '-'}</span>
                           </div>
-                          <div className="text-gray-900">{log.message}</div>
+                          <div className="text-gray-900 whitespace-pre-wrap">{log.message}</div>
                         </div>
                       </div>
                     ))
@@ -385,36 +524,6 @@ const Index = () => {
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-4">
-                  <h3 className="font-semibold text-gray-900">Отслеживаемые разделы</h3>
-                  
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="space-y-1">
-                        <Label htmlFor="section-postanovleniya" className="text-base">Постановления</Label>
-                        <p className="text-sm text-gray-500">/docs/smolensk/postanovleniya/</p>
-                      </div>
-                      <Switch id="section-postanovleniya" defaultChecked />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="space-y-1">
-                        <Label htmlFor="section-rasporyazheniya" className="text-base">Распоряжения</Label>
-                        <p className="text-sm text-gray-500">/docs/smolensk/rasporyazheniya/</p>
-                      </div>
-                      <Switch id="section-rasporyazheniya" defaultChecked />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="space-y-1">
-                        <Label htmlFor="section-programmy" className="text-base">Муниципальные программы</Label>
-                        <p className="text-sm text-gray-500">/docs/municipalnye-programmy/</p>
-                      </div>
-                      <Switch id="section-programmy" defaultChecked />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4 pt-6 border-t">
                   <h3 className="font-semibold text-gray-900">Уведомления</h3>
                   
                   <div className="space-y-3">
@@ -435,37 +544,19 @@ const Index = () => {
                         value={telegramChatId}
                         onChange={(e) => setTelegramChatId(e.target.value)}
                       />
-                      <p className="text-xs text-gray-500">Ваш Chat ID: {telegramChatId || 'не указан'}</p>
+                      <p className="text-xs text-gray-500">Chat ID: {telegramChatId || 'не указан'}</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="space-y-4 pt-6 border-t">
-                  <h3 className="font-semibold text-gray-900">Расписание проверки</h3>
-                  
-                  <div className="p-4 border rounded-lg space-y-3">
-                    <Label>Частота мониторинга</Label>
-                    <Select defaultValue="daily">
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="hourly">Каждый час</SelectItem>
-                        <SelectItem value="daily">Ежедневно (14:30)</SelectItem>
-                        <SelectItem value="weekly">Еженедельно</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
+                <div className="flex gap-3 pt-4 border-t">
                   <Button className="flex-1" onClick={handleSaveSettings}>
                     <Icon name="Save" size={16} className="mr-2" />
                     Сохранить настройки
                   </Button>
                   <Button variant="outline" onClick={handleRunParser} disabled={loading}>
                     <Icon name="Play" size={16} className="mr-2" />
-                    {loading ? 'Запуск...' : 'Запустить проверку'}
+                    {loading ? 'Запуск...' : 'Запустить парсинг'}
                   </Button>
                 </div>
               </CardContent>
