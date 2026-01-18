@@ -22,11 +22,32 @@ const Index = () => {
   const [settings, setSettings] = useState<any>({});
   const [loading, setLoading] = useState(false);
   const [telegramChatId, setTelegramChatId] = useState('');
+  const [activeTab, setActiveTab] = useState('documents');
+  const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     loadAllData();
   }, []);
+
+  useEffect(() => {
+    if (autoRefreshLogs) {
+      const interval = setInterval(async () => {
+        try {
+          const [logsData, statsData] = await Promise.all([
+            apiClient.getLogs(50),
+            apiClient.getStats()
+          ]);
+          setLogs(logsData.logs || []);
+          setStats(statsData);
+        } catch (error) {
+          console.error('Failed to refresh logs:', error);
+        }
+      }, 3000);
+
+      return () => clearInterval(interval);
+    }
+  }, [autoRefreshLogs]);
 
   const loadAllData = async () => {
     try {
@@ -68,22 +89,26 @@ const Index = () => {
 
   const handleRunParser = async () => {
     setLoading(true);
+    setActiveTab('logs');
+    setAutoRefreshLogs(true);
+    
     try {
       const currentYear = new Date().getFullYear();
       const years = Array.from({ length: currentYear - 2008 }, (_, i) => 2009 + i);
       
-      await apiClient.runParser(['postanovleniya', 'rasporyazheniya', 'programmy'], years);
+      apiClient.runParser(['postanovleniya', 'rasporyazheniya', 'programmy'], years);
+      
       toast({
-        title: 'Парсинг запущен',
-        description: `Система начала сканирование документов за ${years.length} лет (2009-${currentYear})`
+        title: 'Парсинг запущен в фоне',
+        description: `Система начала сканирование документов за ${years.length} лет (2009-${currentYear}). Логи обновляются автоматически.`
       });
-      setTimeout(() => loadAllData(), 10000);
     } catch (error) {
       toast({
         title: 'Ошибка',
         description: 'Не удалось запустить парсинг',
         variant: 'destructive'
       });
+      setAutoRefreshLogs(false);
     } finally {
       setLoading(false);
     }
@@ -149,7 +174,7 @@ const Index = () => {
           </Card>
         </div>
 
-        <Tabs defaultValue="documents" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList>
             <TabsTrigger value="documents" className="gap-2">
               <Icon name="FileText" size={16} />
@@ -296,8 +321,25 @@ const Index = () => {
           <TabsContent value="logs">
             <Card>
               <CardHeader>
-                <CardTitle>Логи парсинга</CardTitle>
-                <CardDescription>Подробная информация о работе системы мониторинга</CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Логи парсинга</CardTitle>
+                    <CardDescription>Подробная информация о работе системы мониторинга</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Label htmlFor="auto-refresh" className="text-sm cursor-pointer">
+                      <div className="flex items-center gap-2">
+                        {autoRefreshLogs && <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />}
+                        Автообновление
+                      </div>
+                    </Label>
+                    <Switch 
+                      id="auto-refresh" 
+                      checked={autoRefreshLogs} 
+                      onCheckedChange={setAutoRefreshLogs}
+                    />
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
