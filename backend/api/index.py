@@ -257,26 +257,50 @@ def get_analytics(cursor, schema: str) -> dict:
     by_section = cursor.fetchall()
     
     # Статистика по годам (берем год из document_date или published_date)
+    # Фильтруем аномальные года (только 2009-2026)
+    cursor.execute(f"""
+        SELECT 
+            EXTRACT(YEAR FROM COALESCE(document_date, published_date, created_at))::integer as year,
+            section,
+            COUNT(*) as count
+        FROM {schema}.documents
+        WHERE COALESCE(document_date, published_date, created_at) IS NOT NULL
+            AND EXTRACT(YEAR FROM COALESCE(document_date, published_date, created_at))::integer BETWEEN 2009 AND 2026
+        GROUP BY year, section
+        ORDER BY year DESC, section
+    """)
+    by_year_section = cursor.fetchall()
+    
+    # Общая статистика по годам
     cursor.execute(f"""
         SELECT 
             EXTRACT(YEAR FROM COALESCE(document_date, published_date, created_at))::integer as year,
             COUNT(*) as count
         FROM {schema}.documents
         WHERE COALESCE(document_date, published_date, created_at) IS NOT NULL
+            AND EXTRACT(YEAR FROM COALESCE(document_date, published_date, created_at))::integer BETWEEN 2009 AND 2026
         GROUP BY year
         ORDER BY year DESC
     """)
     by_year = cursor.fetchall()
     
-    # Динамика публикаций (последние 90 дней)
+    # Динамика публикаций (последние 5 лет = 1825 дней)
+    # Генерируем все даты, даже с 0 документов
     cursor.execute(f"""
+        WITH date_series AS (
+            SELECT generate_series(
+                CURRENT_DATE - INTERVAL '5 years',
+                CURRENT_DATE,
+                '1 day'::interval
+            )::date as date
+        )
         SELECT 
-            TO_CHAR(COALESCE(published_date, created_at), 'DD.MM.YYYY') as date,
-            COUNT(*) as count
-        FROM {schema}.documents
-        WHERE COALESCE(published_date, created_at) >= CURRENT_DATE - INTERVAL '90 days'
-        GROUP BY date, COALESCE(published_date, created_at)
-        ORDER BY COALESCE(published_date, created_at) ASC
+            TO_CHAR(ds.date, 'DD.MM.YYYY') as date,
+            COALESCE(COUNT(d.id), 0) as count
+        FROM date_series ds
+        LEFT JOIN {schema}.documents d ON DATE(COALESCE(d.published_date, d.created_at)) = ds.date
+        GROUP BY ds.date
+        ORDER BY ds.date ASC
     """)
     by_publication_date = cursor.fetchall()
     
@@ -294,6 +318,7 @@ def get_analytics(cursor, schema: str) -> dict:
     return {
         'by_section': by_section,
         'by_year': by_year,
+        'by_year_section': by_year_section,
         'by_publication_date': by_publication_date,
         'total_documents': total_documents,
         'total_files': total_files,

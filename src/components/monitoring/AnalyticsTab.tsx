@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 
@@ -7,6 +9,7 @@ interface AnalyticsTabProps {
   analytics: {
     by_section: { section: string; count: number }[];
     by_year: { year: number; count: number }[];
+    by_year_section: { year: number; section: string; count: number }[];
     by_publication_date: { date: string; count: number }[];
     total_documents: number;
     total_files: number;
@@ -23,6 +26,7 @@ const COLORS = {
 const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
+  const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
   console.log('AnalyticsTab render:', analytics);
   
   if (!analytics) {
@@ -43,6 +47,22 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
     if (mbNum >= 1024) return `${(mbNum / 1024).toFixed(2)} ГБ`;
     return `${mbNum.toFixed(2)} МБ`;
   };
+
+  // Подготовка данных для графика "Документы по годам" с фильтром по разделам
+  const getYearChartData = () => {
+    if (!analytics) return [];
+    
+    if (selectedSectionFilter === 'all') {
+      return analytics.by_year;
+    }
+    
+    return analytics.by_year_section
+      .filter(item => item.section === selectedSectionFilter)
+      .map(item => ({ year: item.year, count: item.count }));
+  };
+
+  const yearChartData = getYearChartData();
+  const totalInYearChart = yearChartData.reduce((sum, item) => sum + item.count, 0);
 
   return (
     <div className="space-y-6">
@@ -187,12 +207,39 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
       {/* Распределение по годам */}
       <Card>
         <CardHeader>
-          <CardTitle>Документы по годам</CardTitle>
-          <CardDescription>Количество документов по годам публикации</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Документы по годам</CardTitle>
+              <CardDescription>Количество документов по годам публикации</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Всего: <span className="font-bold text-gray-900">{totalInYearChart}</span></span>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <Button 
+              variant={selectedSectionFilter === 'all' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setSelectedSectionFilter('all')}
+            >
+              Все разделы
+            </Button>
+            {analytics.by_section.map((section) => (
+              <Button 
+                key={section.section}
+                variant={selectedSectionFilter === section.section ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSelectedSectionFilter(section.section)}
+              >
+                {section.section}
+              </Button>
+            ))}
+          </div>
+
           <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={analytics.by_year}>
+            <BarChart data={yearChartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis 
                 dataKey="year" 
@@ -215,7 +262,7 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
           </ResponsiveContainer>
 
           <div className="mt-6 grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
-            {analytics.by_year.map((item) => (
+            {yearChartData.map((item) => (
               <div key={item.year} className="p-3 border rounded-lg text-center hover:bg-gray-50 transition-colors">
                 <div className="text-xs text-gray-500">{item.year}</div>
                 <div className="text-lg font-bold text-gray-900 mt-1">{item.count}</div>
@@ -229,7 +276,7 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
       <Card>
         <CardHeader>
           <CardTitle>Динамика публикаций документов</CardTitle>
-          <CardDescription>Количество опубликованных документов по дням (последние 90 дней)</CardDescription>
+          <CardDescription>Количество опубликованных документов по дням (последние 5 лет = {analytics.by_publication_date.length} дней)</CardDescription>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={400}>
@@ -237,10 +284,8 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis 
                 dataKey="date" 
-                tick={{ fontSize: 11 }}
-                angle={-45}
-                textAnchor="end"
-                height={80}
+                tick={false}
+                label={{ value: 'Дата', position: 'insideBottom', offset: -5, style: { fontSize: 12 } }}
               />
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip 
@@ -256,9 +301,8 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
                 type="monotone" 
                 dataKey="count" 
                 stroke="#f59e0b" 
-                strokeWidth={2}
-                dot={{ fill: '#f59e0b', r: 4 }}
-                activeDot={{ r: 6 }}
+                strokeWidth={1}
+                dot={false}
                 name="Документов"
               />
             </LineChart>
@@ -270,8 +314,8 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
               <div className="text-sm text-blue-900">
                 <p className="font-medium mb-1">Анализ динамики публикаций</p>
                 <p className="text-xs text-blue-700">
-                  График показывает количество документов, опубликованных на сайте за каждый день в последние 90 дней. 
-                  Пики активности могут указывать на важные события или плановые публикации.
+                  График показывает количество документов, опубликованных на сайте за каждый день в последние 5 лет (включая дни с 0 публикаций). 
+                  Каждый пиксель соответствует 1 дню. Пики активности могут указывать на важные события или плановые публикации.
                 </p>
               </div>
             </div>
