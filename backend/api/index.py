@@ -52,6 +52,8 @@ def handler(event: dict, context) -> dict:
                 result = get_stats(cursor, schema)
             elif endpoint == 'parsing_progress':
                 result = get_parsing_progress(cursor, schema)
+            elif endpoint == 'analytics':
+                result = get_analytics(cursor, schema)
             else:
                 cursor.close()
                 conn.close()
@@ -231,6 +233,63 @@ def get_stats(cursor, schema: str) -> dict:
         'total_documents': total_docs,
         'changes_this_week': changes_week,
         'active_sections': active_sections
+    }
+
+
+def get_analytics(cursor, schema: str) -> dict:
+    """Получение аналитики по документам"""
+    
+    # Статистика по разделам
+    cursor.execute(f"""
+        SELECT section, COUNT(*) as count
+        FROM {schema}.documents
+        GROUP BY section
+        ORDER BY count DESC
+    """)
+    by_section = cursor.fetchall()
+    
+    # Статистика по годам (берем год из document_date или published_date)
+    cursor.execute(f"""
+        SELECT 
+            EXTRACT(YEAR FROM COALESCE(document_date, published_date, created_at))::integer as year,
+            COUNT(*) as count
+        FROM {schema}.documents
+        WHERE COALESCE(document_date, published_date, created_at) IS NOT NULL
+        GROUP BY year
+        ORDER BY year DESC
+    """)
+    by_year = cursor.fetchall()
+    
+    # Динамика публикаций (последние 90 дней)
+    cursor.execute(f"""
+        SELECT 
+            TO_CHAR(COALESCE(published_date, created_at), 'DD.MM.YYYY') as date,
+            COUNT(*) as count
+        FROM {schema}.documents
+        WHERE COALESCE(published_date, created_at) >= CURRENT_DATE - INTERVAL '90 days'
+        GROUP BY date, COALESCE(published_date, created_at)
+        ORDER BY COALESCE(published_date, created_at) ASC
+    """)
+    by_publication_date = cursor.fetchall()
+    
+    # Общая статистика
+    cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.documents")
+    total_documents = cursor.fetchone()['total']
+    
+    cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.document_files")
+    total_files = cursor.fetchone()['total']
+    
+    cursor.execute(f"SELECT COALESCE(SUM(file_size), 0) as total_size FROM {schema}.documents")
+    total_size_bytes = cursor.fetchone()['total_size']
+    total_size_mb = round(total_size_bytes / (1024 * 1024), 2) if total_size_bytes else 0
+    
+    return {
+        'by_section': by_section,
+        'by_year': by_year,
+        'by_publication_date': by_publication_date,
+        'total_documents': total_documents,
+        'total_files': total_files,
+        'total_size_mb': total_size_mb
     }
 
 

@@ -9,6 +9,7 @@ import DocumentsTab from '@/components/monitoring/DocumentsTab';
 import ChangesTab from '@/components/monitoring/ChangesTab';
 import LogsTab from '@/components/monitoring/LogsTab';
 import SettingsTab from '@/components/monitoring/SettingsTab';
+import AnalyticsTab from '@/components/monitoring/AnalyticsTab';
 
 const Index = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,6 +33,7 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState('documents');
   const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
+  const [analytics, setAnalytics] = useState<any>(null);
   const { toast } = useToast();
 
   const currentYear = new Date().getFullYear();
@@ -39,6 +41,7 @@ const Index = () => {
 
   useEffect(() => {
     loadAllData();
+    loadAnalytics();
   }, []);
 
   useEffect(() => {
@@ -125,6 +128,15 @@ const Index = () => {
       setTotalChanges(changesData.changes?.length || 0);
     } catch (error) {
       console.error('Failed to load changes:', error);
+    }
+  };
+
+  const loadAnalytics = async () => {
+    try {
+      const analyticsData = await apiClient.getAnalytics();
+      setAnalytics(analyticsData);
+    } catch (error) {
+      console.error('Failed to load analytics:', error);
     }
   };
 
@@ -352,6 +364,10 @@ const Index = () => {
               <Icon name="Bell" size={16} />
               Изменения
             </TabsTrigger>
+            <TabsTrigger value="analytics" className="gap-2">
+              <Icon name="BarChart3" size={16} />
+              Аналитика
+            </TabsTrigger>
             <TabsTrigger value="logs" className="gap-2">
               <Icon name="ScrollText" size={16} />
               Логи
@@ -399,6 +415,10 @@ const Index = () => {
               selectedDocumentId={selectedDocumentId}
               onClearDocumentFilter={() => setSelectedDocumentId(null)}
             />
+          </TabsContent>
+
+          <TabsContent value="analytics">
+            <AnalyticsTab analytics={analytics} />
           </TabsContent>
 
           <TabsContent value="logs">

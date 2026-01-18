@@ -121,5 +121,13 @@ export const apiClient = {
     const response = await fetch(`${API_BASE_URL}?${queryParams}`);
     if (!response.ok) throw new Error('Failed to fetch parsing progress');
     return response.json();
+  },
+
+  async getAnalytics() {
+    const queryParams = new URLSearchParams({ endpoint: 'analytics' });
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`);
+    if (!response.ok) throw new Error('Failed to fetch analytics');
+    return response.json();
   }
 };
