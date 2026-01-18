@@ -275,7 +275,17 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         if year <= 2015:
             delay = 0.5
         
+        # Максимальное время работы — 25 секунд (оставляем запас до таймаута 30 сек)
+        max_execution_time = 25
+        
         while page <= MAX_PAGES_PER_RUN and stats['docs_processed'] < MAX_DOCS_PER_RUN:
+            # Проверяем время выполнения перед обработкой страницы
+            elapsed = time.time() - t1
+            if elapsed > max_execution_time:
+                log_create(cursor, schema, section, 'warning', 
+                    f'⏱ Достигнут лимит времени ({elapsed:.1f}с), сохраняю прогресс на странице {page}')
+                conn.commit()
+                break
             url = base_section_url if page == 1 else urljoin(base_section_url, f"page/{page}/")
             
             log_create(cursor, schema, section, 'info', 
