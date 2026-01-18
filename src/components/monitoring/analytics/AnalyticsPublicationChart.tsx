@@ -25,6 +25,49 @@ const AnalyticsPublicationChart = ({ analytics }: AnalyticsPublicationChartProps
   const fullData = analytics?.by_publication_date || [];
   const displayData = chartData.length > 0 ? chartData : fullData;
 
+  const getSmartTicks = () => {
+    const dataLength = displayData.length;
+    
+    if (dataLength <= 30) {
+      return displayData.map(item => item.date);
+    }
+    
+    if (dataLength <= 90) {
+      return displayData.filter((_, idx) => idx % 3 === 0).map(item => item.date);
+    }
+    
+    if (dataLength <= 180) {
+      return displayData.filter((_, idx) => idx % 7 === 0).map(item => item.date);
+    }
+    
+    if (dataLength <= 365) {
+      return displayData.filter((_, idx) => idx % 14 === 0).map(item => item.date);
+    }
+    
+    return displayData
+      .filter((item) => {
+        const date = item.date.split('.')[0];
+        return date === '01';
+      })
+      .map(item => item.date);
+  };
+
+  const formatTickLabel = (value: string) => {
+    const dataLength = displayData.length;
+    
+    if (dataLength <= 90) {
+      return value;
+    }
+    
+    if (dataLength <= 365) {
+      const [day, month, year] = value.split('.');
+      return `${day}.${month}`;
+    }
+    
+    const [, month, year] = value.split('.');
+    return `${month}.${year}`;
+  };
+
   const zoomOut = () => {
     setChartData([]);
     setLeft(0);
@@ -204,8 +247,10 @@ const AnalyticsPublicationChart = ({ analytics }: AnalyticsPublicationChartProps
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis 
               dataKey="date"
-              tick={displayData.length > 365 ? false : { fontSize: 10, angle: -45, textAnchor: 'end' }}
-              height={displayData.length > 365 ? 30 : 80}
+              ticks={getSmartTicks()}
+              tickFormatter={formatTickLabel}
+              tick={{ fontSize: 10, angle: -45, textAnchor: 'end' }}
+              height={80}
             />
             <YAxis 
               tick={{ fontSize: 12 }}
