@@ -75,6 +75,19 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 conn.close()
                 return success_response(result)
+            
+            elif action == 'download_files':
+                limit = body.get('limit', 50)
+                result = download_files(conn, schema, limit)
+                conn.commit()
+                conn.close()
+                return success_response(result)
+            
+            elif action == 'get_download_stats':
+                result = get_download_stats(conn, schema)
+                conn.commit()
+                conn.close()
+                return success_response(result)
         
         conn.close()
         return error_response('Неподдерживаемый метод', 400)
@@ -699,6 +712,106 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
             )
         
         return 'new'
+
+
+def download_files(conn, schema: str, limit: int = 50) -> dict:
+    """Загрузка файлов из БД в S3"""
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    s3 = init_s3()
+    aws_key = os.environ.get('AWS_ACCESS_KEY_ID', '')
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    if not s3 or not aws_key:
+        return {'error': 'S3 не настроен', 'downloaded': 0}
+    
+    # Находим файлы без CDN URL (ещё не загружены в S3)
+    cursor.execute(f"""
+        SELECT df.id, df.document_id, df.file_url, df.file_type, d.section, d.document_number
+        FROM {schema}.document_files df
+        JOIN {schema}.documents d ON d.id = df.document_id
+        WHERE df.file_cdn_url IS NULL OR df.file_cdn_url = ''
+        ORDER BY df.id
+        LIMIT %s
+    """, (limit,))
+    files = cursor.fetchall()
+    
+    stats = {'downloaded': 0, 'errors': 0, 'skipped': 0}
+    
+    for f in files:
+        try:
+            file_url = f['file_url']
+            file_type = f['file_type']
+            section = f['section']
+            doc_num = f['document_number'] or 'unk'
+            
+            # Скачиваем файл
+            resp = requests.get(file_url, headers=headers, timeout=15)
+            if resp.status_code != 200:
+                stats['errors'] += 1
+                continue
+            
+            content = resp.content
+            fsize = len(content)
+            fhash = hashlib.sha256(content).hexdigest()
+            
+            # Загружаем в S3
+            fext = file_url.split('.')[-1].lower() if '.' in file_url else 'bin'
+            fname_part = f"{doc_num}_{file_type}_{fhash[:8]}"
+            fpath = f'docs/{section}/{fname_part}.{fext}'
+            
+            s3.put_object(
+                Bucket='files',
+                Key=fpath,
+                Body=content,
+                ContentType=get_ctype(fext)
+            )
+            
+            cdn_url = f'https://cdn.poehali.dev/projects/{aws_key}/bucket/{fpath}'
+            
+            # Обновляем запись в БД
+            cursor.execute(f"""
+                UPDATE {schema}.document_files 
+                SET file_size = %s, file_path = %s, file_cdn_url = %s, content_hash = %s
+                WHERE id = %s
+            """, (fsize, fpath, cdn_url, fhash, f['id']))
+            
+            # Обновляем главный документ (если это основной файл)
+            if file_type == 'main':
+                cursor.execute(f"""
+                    UPDATE {schema}.documents
+                    SET file_size = %s, file_path = %s, file_cdn_url = %s, content_hash = %s
+                    WHERE id = %s
+                """, (fsize, fpath, cdn_url, fhash, f['document_id']))
+            
+            stats['downloaded'] += 1
+            conn.commit()
+            
+        except Exception as e:
+            stats['errors'] += 1
+            log_create(cursor, schema, 'download', 'error', 
+                f'❌ Ошибка загрузки файла {f["file_url"][:100]}: {str(e)[:200]}')
+            conn.commit()
+    
+    cursor.close()
+    return stats
+
+
+def get_download_stats(conn, schema: str) -> dict:
+    """Статистика загрузки файлов"""
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cursor.execute(f"""
+        SELECT 
+            COUNT(*) as total_files,
+            COUNT(CASE WHEN file_cdn_url IS NOT NULL AND file_cdn_url != '' THEN 1 END) as downloaded,
+            COUNT(CASE WHEN file_cdn_url IS NULL OR file_cdn_url = '' THEN 1 END) as pending
+        FROM {schema}.document_files
+    """)
+    stats = cursor.fetchone()
+    
+    cursor.close()
+    return dict(stats)
 
 
 def extract_num(title: str) -> str:

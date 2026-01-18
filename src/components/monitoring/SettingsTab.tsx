@@ -5,6 +5,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
 import ParsingProgress from './ParsingProgress';
+import FileDownloadPanel from './FileDownloadPanel';
 
 interface SettingsTabProps {
   telegramChatId: string;
@@ -28,6 +29,7 @@ const SettingsTab = ({
   return (
     <div className="space-y-6">
       <ParsingProgress autoRefresh={true} />
+      <FileDownloadPanel />
     <Card>
       <CardHeader>
         <CardTitle>Настройки мониторинга</CardTitle>
