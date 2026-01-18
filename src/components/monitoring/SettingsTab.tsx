@@ -16,6 +16,7 @@ interface SettingsTabProps {
   handleContinueParsing: () => void;
   handleForceReparse: () => void;
   handleCleanLogs: () => void;
+  handleFullReset: () => void;
   loading: boolean;
 }
 
@@ -27,6 +28,7 @@ const SettingsTab = ({
   handleContinueParsing,
   handleForceReparse,
   handleCleanLogs,
+  handleFullReset,
   loading
 }: SettingsTabProps) => {
   return (
@@ -110,18 +112,35 @@ const SettingsTab = ({
             ⚠️ Все документы будут спарсены заново (может занять ~1 час)
           </p>
 
-          <div className="pt-4 border-t">
-            <Button 
-              variant="outline" 
-              className="w-full"
-              onClick={handleCleanLogs}
-            >
-              <Icon name="Trash2" size={16} className="mr-2" />
-              Очистить старые логи
-            </Button>
-            <p className="text-xs text-gray-500 text-center mt-2">
-              Удалить логи парсинга старше 7 дней
-            </p>
+          <div className="pt-4 border-t space-y-4">
+            <div>
+              <Button 
+                variant="outline" 
+                className="w-full"
+                onClick={handleCleanLogs}
+              >
+                <Icon name="Trash2" size={16} className="mr-2" />
+                Очистить старые логи
+              </Button>
+              <p className="text-xs text-gray-500 text-center mt-2">
+                Удалить логи парсинга старше 7 дней
+              </p>
+            </div>
+
+            <div>
+              <Button 
+                variant="destructive" 
+                className="w-full"
+                onClick={handleFullReset}
+                disabled={loading}
+              >
+                <Icon name="AlertTriangle" size={16} className="mr-2" />
+                🚨 ПОЛНЫЙ СБРОС БАЗЫ ДАННЫХ
+              </Button>
+              <p className="text-xs text-red-600 text-center mt-2 font-medium">
+                ⚠️ Удалит ВСЕ документы, файлы, изменения и логи!
+              </p>
+            </div>
           </div>
         </div>
       </CardContent>

@@ -282,6 +282,53 @@ const Index = () => {
     }
   };
 
+  const handleFullReset = async () => {
+    const confirmed = window.confirm(
+      '🚨 КРИТИЧЕСКОЕ ДЕЙСТВИЕ!\n\n' +
+      'Это ПОЛНОСТЬЮ очистит базу данных:\n' +
+      '- Все документы\n' +
+      '- Все файлы\n' +
+      '- Историю изменений\n' +
+      '- Все логи\n\n' +
+      'После этого нужно будет запустить парсинг заново.\n\n' +
+      'Вы уверены?'
+    );
+
+    if (!confirmed) return;
+
+    const doubleConfirm = window.confirm(
+      '⚠️ Последнее предупреждение!\n\n' +
+      'Данные будут удалены БЕЗВОЗВРАТНО.\n\n' +
+      'Точно продолжить?'
+    );
+
+    if (!doubleConfirm) return;
+
+    setLoading(true);
+
+    try {
+      const result = await apiClient.fullReset();
+      
+      toast({
+        title: '✅ База данных очищена',
+        description: `Удалено ${result.total_deleted} записей. Теперь можно запустить парсинг.`
+      });
+
+      setTimeout(() => {
+        loadAllData();
+        loadAnalytics();
+      }, 1000);
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось очистить базу данных',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatFileSize = (bytes: number) => {
     if (!bytes) return '-';
     const kb = bytes / 1024;
@@ -467,6 +514,7 @@ const Index = () => {
               handleContinueParsing={handleContinueParsing}
               handleForceReparse={handleForceReparse}
               handleCleanLogs={handleCleanLogs}
+              handleFullReset={handleFullReset}
               loading={loading}
             />
           </TabsContent>

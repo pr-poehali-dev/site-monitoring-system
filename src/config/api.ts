@@ -166,5 +166,17 @@ export const apiClient = {
     
     if (!response.ok) throw new Error('Failed to retry downloads');
     return response.json();
+  },
+
+  async fullReset() {
+    const queryParams = new URLSearchParams({ endpoint: 'full_reset' });
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) throw new Error('Failed to reset database');
+    return response.json();
   }
 };
