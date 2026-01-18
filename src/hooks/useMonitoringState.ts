@@ -120,6 +120,13 @@ export const useMonitoringState = () => {
           ]);
           setLogs(logsData.logs || []);
           setStats(statsData);
+          
+          // Автопродолжение парсинга если есть pending задачи
+          if (statsData?.pending > 0) {
+            apiClient.continueParsing(true).catch(err => 
+              console.error('Auto-continue failed:', err)
+            );
+          }
         } catch (error) {
           console.error('Failed to refresh logs:', error);
         }
