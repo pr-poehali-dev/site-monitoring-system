@@ -55,13 +55,33 @@ export const useMonitoringActions = ({
     try {
       await apiClient.runParser(['programmy', 'rasporyazheniya', 'postanovleniya'], years.map(y => parseInt(y)));
       
-      setTimeout(() => {
-        apiClient.continueParsing(true);
-      }, 2000);
+      // Запускаем автопродолжение в цикле
+      const continueLoop = async () => {
+        try {
+          const result = await apiClient.continueParsing(false);
+          
+          if (result.status === 'continued') {
+            // Есть ещё задачи, продолжаем через 1 сек
+            setTimeout(continueLoop, 1000);
+          } else if (result.status === 'all_completed') {
+            toast({
+              title: '🎉 Парсинг завершён!',
+              description: result.message || 'Все разделы обработаны'
+            });
+            setAutoRefreshLogs(false);
+          }
+        } catch (error) {
+          console.error('Continue parsing failed:', error);
+          // Повторяем через 3 сек при ошибке
+          setTimeout(continueLoop, 3000);
+        }
+      };
+      
+      setTimeout(continueLoop, 2000);
       
       toast({
-        title: 'Парсинг запущен в фоне',
-        description: `Система работает автономно. Можно закрыть страницу — парсинг продолжится до конца. Уведомления придут в Telegram.`
+        title: 'Парсинг запущен',
+        description: `Обрабатываем документы...`
       });
     } catch (error) {
       toast({
@@ -79,32 +99,34 @@ export const useMonitoringActions = ({
     setActiveTab('logs');
     setAutoRefreshLogs(true);
     
-    try {
-      const result = await apiClient.continueParsing(true);
-      
-      if (result.status === 'all_completed') {
-        toast({
-          title: '🎉 Парсинг полностью завершён!',
-          description: result.message || 'Все разделы и годы обработаны',
-        });
-      } else if (result.status === 'no_pending') {
-        toast({
-          title: 'Нет незавершённых задач',
-          description: 'Все парсинги завершены или не запущены',
-        });
-      } else {
-        toast({
-          title: 'Парсинг продолжается в фоне',
-          description: 'Можно закрыть страницу — парсинг продолжится автоматически до конца.',
-        });
+    const continueLoop = async () => {
+      try {
+        const result = await apiClient.continueParsing(false);
+        
+        if (result.status === 'continued') {
+          // Есть ещё задачи, продолжаем через 1 сек
+          setTimeout(continueLoop, 1000);
+        } else if (result.status === 'all_completed') {
+          toast({
+            title: '🎉 Парсинг завершён!',
+            description: result.message || 'Все разделы обработаны'
+          });
+          setAutoRefreshLogs(false);
+        } else if (result.status === 'no_pending') {
+          toast({
+            title: 'Нет незавершённых задач',
+            description: 'Все парсинги завершены'
+          });
+          setAutoRefreshLogs(false);
+        }
+      } catch (error) {
+        console.error('Continue parsing failed:', error);
+        // Повторяем через 3 сек при ошибке
+        setTimeout(continueLoop, 3000);
       }
-    } catch (error) {
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось продолжить парсинг',
-        variant: 'destructive'
-      });
-    }
+    };
+    
+    continueLoop();
   };
 
   const handleForceReparse = async () => {
@@ -124,13 +146,31 @@ export const useMonitoringActions = ({
     try {
       await apiClient.runParser(['programmy', 'rasporyazheniya', 'postanovleniya'], years.map(y => parseInt(y)), true);
       
-      setTimeout(() => {
-        apiClient.continueParsing(true);
-      }, 2000);
+      // Запускаем автопродолжение в цикле
+      const continueLoop = async () => {
+        try {
+          const result = await apiClient.continueParsing(false);
+          
+          if (result.status === 'continued') {
+            setTimeout(continueLoop, 1000);
+          } else if (result.status === 'all_completed') {
+            toast({
+              title: '🎉 Перепарсинг завершён!',
+              description: result.message || 'Все разделы обработаны заново'
+            });
+            setAutoRefreshLogs(false);
+          }
+        } catch (error) {
+          console.error('Continue parsing failed:', error);
+          setTimeout(continueLoop, 3000);
+        }
+      };
+      
+      setTimeout(continueLoop, 2000);
       
       toast({
         title: '🔄 Полный перепарсинг запущен',
-        description: `Все документы будут обработаны заново. Система работает автономно — можно закрыть страницу.`
+        description: `Обрабатываем все документы заново...`
       });
     } catch (error) {
       toast({
