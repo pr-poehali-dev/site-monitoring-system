@@ -78,7 +78,8 @@ def handler(event: dict, context) -> dict:
             
             elif action == 'download_files':
                 limit = body.get('limit', 50)
-                result = download_files(conn, schema, limit)
+                auto_loop = body.get('auto_loop', False)
+                result = download_files(conn, schema, limit, auto_loop)
                 conn.commit()
                 conn.close()
                 return success_response(result)
@@ -744,8 +745,8 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
         return 'new'
 
 
-def download_files(conn, schema: str, limit: int = 50) -> dict:
-    """Загрузка файлов из БД в S3"""
+def download_files(conn, schema: str, limit: int = 50, auto_loop: bool = False) -> dict:
+    """Загрузка файлов из БД в S3 с автоматическим продолжением"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     s3 = init_s3()
@@ -754,6 +755,21 @@ def download_files(conn, schema: str, limit: int = 50) -> dict:
     
     if not s3 or not aws_key:
         return {'error': 'S3 не настроен', 'downloaded': 0}
+    
+    # Проверяем, есть ли ещё файлы для загрузки
+    cursor.execute(f"""
+        SELECT COUNT(*) as pending
+        FROM {schema}.document_files
+        WHERE file_cdn_url IS NULL OR file_cdn_url = ''
+    """)
+    pending_count = cursor.fetchone()['pending']
+    
+    if pending_count == 0:
+        log_create(cursor, schema, 'download', 'success', 
+            '✅ Все файлы уже загружены в S3')
+        conn.commit()
+        cursor.close()
+        return {'status': 'completed', 'downloaded': 0, 'pending': 0, 'message': 'Все файлы загружены'}
     
     # Находим файлы без CDN URL (ещё не загружены в S3)
     cursor.execute(f"""
@@ -766,9 +782,27 @@ def download_files(conn, schema: str, limit: int = 50) -> dict:
     """, (limit,))
     files = cursor.fetchall()
     
+    if not files:
+        cursor.close()
+        return {'status': 'completed', 'downloaded': 0, 'pending': 0}
+    
+    log_create(cursor, schema, 'download', 'info', 
+        f'📥 Загрузка {len(files)} файлов в S3 (осталось {pending_count})')
+    conn.commit()
+    
     stats = {'downloaded': 0, 'errors': 0, 'skipped': 0}
+    t_start = time.time()
+    max_execution_time = 25
     
     for f in files:
+        # Проверяем лимит времени выполнения
+        elapsed = time.time() - t_start
+        if elapsed > max_execution_time:
+            log_create(cursor, schema, 'download', 'warning', 
+                f'⏱ Достигнут лимит времени ({elapsed:.1f}с), загружено {stats["downloaded"]} файлов')
+            conn.commit()
+            break
+        
         try:
             file_url = f['file_url']
             file_type = f['file_type']
@@ -823,8 +857,54 @@ def download_files(conn, schema: str, limit: int = 50) -> dict:
                 f'❌ Ошибка загрузки файла {f["file_url"][:100]}: {str(e)[:200]}')
             conn.commit()
     
-    cursor.close()
-    return stats
+    # Проверяем, остались ли ещё файлы
+    cursor.execute(f"""
+        SELECT COUNT(*) as pending
+        FROM {schema}.document_files
+        WHERE file_cdn_url IS NULL OR file_cdn_url = ''
+    """)
+    remaining = cursor.fetchone()['pending']
+    
+    duration_ms = int((time.time() - t_start) * 1000)
+    
+    if remaining > 0:
+        log_create(cursor, schema, 'download', 'info', 
+            f'✅ Загружено {stats["downloaded"]} файлов за {duration_ms}мс (ошибок: {stats["errors"]}). Осталось: {remaining}')
+        conn.commit()
+        
+        # Если включен auto_loop и есть ещё файлы, запускаем следующую итерацию
+        if auto_loop and stats['downloaded'] > 0:
+            try:
+                requests.post(
+                    PARSER_BASE_URL,
+                    json={'action': 'download_files', 'limit': limit, 'auto_loop': True},
+                    timeout=2
+                )
+            except:
+                pass
+        
+        cursor.close()
+        return {
+            'status': 'in_progress',
+            'downloaded': stats['downloaded'],
+            'errors': stats['errors'],
+            'pending': remaining,
+            'auto_loop': auto_loop
+        }
+    else:
+        log_create(cursor, schema, 'download', 'success', 
+            f'🎉 ВСЕ ФАЙЛЫ ЗАГРУЖЕНЫ! Загружено {stats["downloaded"]} файлов за {duration_ms}мс (ошибок: {stats["errors"]})')
+        send_tg_parsing_event(cursor, schema, 'completed', 
+            f'Загрузка файлов в S3 завершена!\nВсего загружено файлов: {stats["downloaded"]}\nОшибок: {stats["errors"]}')
+        conn.commit()
+        cursor.close()
+        return {
+            'status': 'completed',
+            'downloaded': stats['downloaded'],
+            'errors': stats['errors'],
+            'pending': 0,
+            'message': '🎉 Все файлы загружены в S3!'
+        }
 
 
 def get_download_stats(conn, schema: str) -> dict:

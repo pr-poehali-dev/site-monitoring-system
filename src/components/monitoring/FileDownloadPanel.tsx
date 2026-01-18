@@ -36,26 +36,27 @@ const FileDownloadPanel = () => {
     }
   };
 
-  const startDownload = async () => {
+  const startDownload = async (enableAutoLoop: boolean = false) => {
     try {
       setDownloading(true);
-      const response = await fetch(PARSER_URL, {
+      
+      // Запускаем загрузку с auto_loop флагом (фоновая обработка на бэкенде)
+      fetch(PARSER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'download_files', limit: 50 })
-      });
-      const result = await response.json();
+        body: JSON.stringify({ 
+          action: 'download_files', 
+          limit: 50,
+          auto_loop: enableAutoLoop 
+        })
+      }).catch(() => {});
       
-      // Обновляем статистику после загрузки
-      await fetchStats();
-      
-      // Если есть ещё файлы и включен автозагрузка, продолжаем
-      if (autoDownload && result.downloaded > 0) {
-        setTimeout(startDownload, 2000);
-      } else {
+      // Даём время на старт
+      setTimeout(() => {
         setDownloading(false);
-        setAutoDownload(false);
-      }
+        fetchStats();
+      }, 1000);
+      
     } catch (error) {
       console.error('Ошибка загрузки файлов:', error);
       setDownloading(false);
@@ -66,7 +67,7 @@ const FileDownloadPanel = () => {
   const toggleAutoDownload = () => {
     if (!autoDownload) {
       setAutoDownload(true);
-      startDownload();
+      startDownload(true); // Включаем auto_loop на бэкенде
     } else {
       setAutoDownload(false);
       setDownloading(false);
@@ -156,14 +157,17 @@ const FileDownloadPanel = () => {
                   </Button>
                 </div>
                 
-                {autoDownload && (
-                  <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <Icon name="Info" size={16} className="text-blue-600" />
-                    <p className="text-xs text-blue-700">
-                      Автоматическая загрузка файлов. Процесс остановится когда все файлы будут загружены.
-                    </p>
+                <div className="p-3 border rounded-lg bg-blue-50 border-blue-200">
+                  <div className="flex items-start gap-3">
+                    <Icon name="Info" size={18} className="text-blue-600 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-blue-900">Автономный режим</p>
+                      <p className="text-xs text-blue-700">
+                        Загрузка работает в фоне на сервере. Можно закрыть страницу — процесс продолжится автоматически до завершения.
+                      </p>
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             )}
 
