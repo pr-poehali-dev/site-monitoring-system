@@ -50,6 +50,8 @@ def handler(event: dict, context) -> dict:
                 result = get_settings(cursor, schema)
             elif endpoint == 'stats':
                 result = get_stats(cursor, schema)
+            elif endpoint == 'parsing_progress':
+                result = get_parsing_progress(cursor, schema)
             else:
                 cursor.close()
                 conn.close()
@@ -229,6 +231,54 @@ def get_stats(cursor, schema: str) -> dict:
         'total_documents': total_docs,
         'changes_this_week': changes_week,
         'active_sections': active_sections
+    }
+
+
+def get_parsing_progress(cursor, schema: str) -> dict:
+    """Получение прогресса парсинга"""
+    cursor.execute(f"""
+        SELECT section, year, page, status, retry_count, last_error, updated_at
+        FROM {schema}.parsing_state
+        ORDER BY 
+            CASE section 
+                WHEN 'programmy' THEN 1 
+                WHEN 'rasporyazheniya' THEN 2 
+                WHEN 'postanovleniya' THEN 3 
+                ELSE 4 
+            END,
+            year DESC
+    """)
+    states = cursor.fetchall()
+    
+    total = len(states)
+    completed = sum(1 for s in states if s['status'] == 'completed')
+    running = [s for s in states if s['status'] in ('running', 'retry', 'pending')]
+    failed = [s for s in states if s['status'] == 'failed']
+    
+    section_names = {
+        'programmy': 'Муниципальные программы',
+        'rasporyazheniya': 'Распоряжения',
+        'postanovleniya': 'Постановления'
+    }
+    
+    current_task = None
+    if running:
+        task = running[0]
+        current_task = {
+            'section': section_names.get(task['section'], task['section']),
+            'year': task['year'],
+            'page': task['page'],
+            'status': task['status']
+        }
+    
+    return {
+        'total_tasks': total,
+        'completed_tasks': completed,
+        'progress_percent': round((completed / total * 100) if total > 0 else 0, 1),
+        'current_task': current_task,
+        'running_count': len(running),
+        'failed_count': len(failed),
+        'all_states': states
     }
 
 

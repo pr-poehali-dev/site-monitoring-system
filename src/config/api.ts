@@ -111,5 +111,13 @@ export const apiClient = {
     
     if (!response.ok) throw new Error('Failed to continue parsing');
     return response.json();
+  },
+
+  async getParsingProgress() {
+    const queryParams = new URLSearchParams({ endpoint: 'parsing_progress' });
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`);
+    if (!response.ok) throw new Error('Failed to fetch parsing progress');
+    return response.json();
   }
 };

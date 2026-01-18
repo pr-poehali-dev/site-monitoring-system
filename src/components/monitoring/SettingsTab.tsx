@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
+import ParsingProgress from './ParsingProgress';
 
 interface SettingsTabProps {
   telegramChatId: string;
@@ -27,6 +28,8 @@ const SettingsTab = ({
   loading
 }: SettingsTabProps) => {
   return (
+    <div className="space-y-6">{/* Обёрточный div для нескольких карточек */}
+      <ParsingProgress autoRefresh={autoContinue} />
     <Card>
       <CardHeader>
         <CardTitle>Настройки мониторинга</CardTitle>
@@ -94,6 +97,7 @@ const SettingsTab = ({
         </div>
       </CardContent>
     </Card>
+    </div>{/* Закрывающий div обёртки */}
   );
 };
 
