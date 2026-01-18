@@ -50,12 +50,15 @@ const Index = () => {
   const handleRunParser = async () => {
     setLoading(true);
     try {
-      await apiClient.runParser(['postanovleniya', 'rasporyazheniya', 'programmy'], [2024, 2025]);
+      const currentYear = new Date().getFullYear();
+      const years = Array.from({ length: currentYear - 2008 }, (_, i) => 2009 + i);
+      
+      await apiClient.runParser(['postanovleniya', 'rasporyazheniya', 'programmy'], years);
       toast({
         title: 'Парсинг запущен',
-        description: 'Система начала сканирование документов'
+        description: `Система начала сканирование документов за ${years.length} лет (2009-${currentYear})`
       });
-      setTimeout(() => loadAllData(), 5000);
+      setTimeout(() => loadAllData(), 10000);
     } catch (error) {
       toast({
         title: 'Ошибка',
