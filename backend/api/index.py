@@ -87,6 +87,12 @@ def handler(event: dict, context) -> dict:
                 cursor.close()
                 conn.close()
                 return success_response(result)
+            elif endpoint == 'remove_duplicates':
+                result = remove_duplicate_documents(cursor, schema)
+                conn.commit()
+                cursor.close()
+                conn.close()
+                return success_response(result)
         
         cursor.close()
         conn.close()
@@ -506,6 +512,81 @@ def retry_failed_downloads(cursor, schema: str) -> dict:
     return {
         'updated': updated_count,
         'message': f'Помечено {updated_count} файлов для повторной загрузки'
+    }
+
+
+def remove_duplicate_documents(cursor, schema: str) -> dict:
+    """Удаление дублирующихся документов из базы данных"""
+    
+    # Шаг 1: Подсчет дублей перед удалением
+    cursor.execute(f"""
+        SELECT COUNT(*) as duplicate_groups
+        FROM (
+            SELECT document_number, document_date, title, COUNT(*) as cnt
+            FROM {schema}.documents
+            WHERE document_number IS NOT NULL
+            GROUP BY document_number, document_date, title
+            HAVING COUNT(*) > 1
+        ) dups
+    """)
+    duplicate_groups = cursor.fetchone()['duplicate_groups']
+    
+    # Шаг 2: Найти ID дублей для удаления (оставляем самую новую запись)
+    cursor.execute(f"""
+        SELECT id
+        FROM (
+            SELECT 
+                id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY document_number, document_date, title 
+                    ORDER BY created_at DESC, id DESC
+                ) as rn
+            FROM {schema}.documents
+            WHERE document_number IS NOT NULL
+        ) ranked
+        WHERE rn > 1
+    """)
+    
+    ids_to_delete = [row['id'] for row in cursor.fetchall()]
+    count_to_delete = len(ids_to_delete)
+    
+    if count_to_delete == 0:
+        return {
+            'deleted_documents': 0,
+            'deleted_changes': 0,
+            'deleted_files': 0,
+            'duplicate_groups': 0,
+            'message': 'Дубликаты не найдены'
+        }
+    
+    # Шаг 3: Удаление связанных записей из document_changes
+    placeholders = ','.join(['%s'] * len(ids_to_delete))
+    cursor.execute(f"""
+        DELETE FROM {schema}.document_changes
+        WHERE document_id IN ({placeholders})
+    """, ids_to_delete)
+    deleted_changes = cursor.rowcount
+    
+    # Шаг 4: Удаление связанных записей из document_files
+    cursor.execute(f"""
+        DELETE FROM {schema}.document_files
+        WHERE document_id IN ({placeholders})
+    """, ids_to_delete)
+    deleted_files = cursor.rowcount
+    
+    # Шаг 5: Удаление самих дублей
+    cursor.execute(f"""
+        DELETE FROM {schema}.documents
+        WHERE id IN ({placeholders})
+    """, ids_to_delete)
+    deleted_documents = cursor.rowcount
+    
+    return {
+        'deleted_documents': deleted_documents,
+        'deleted_changes': deleted_changes,
+        'deleted_files': deleted_files,
+        'duplicate_groups': duplicate_groups,
+        'message': f'Удалено {deleted_documents} дубликатов из {duplicate_groups} групп'
     }
 
 
