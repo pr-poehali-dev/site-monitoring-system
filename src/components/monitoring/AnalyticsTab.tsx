@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 
 interface AnalyticsTabProps {
   analytics: {
@@ -13,6 +13,8 @@ interface AnalyticsTabProps {
     by_publication_date: { date: string; count: number }[];
     total_documents: number;
     total_files: number;
+    documents_without_files: number;
+    documents_with_multiple_files: number;
     total_size_mb: number | string;
   } | null;
 }
@@ -84,6 +86,11 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
               <Icon name="Files" size={24} className="mx-auto text-green-600 mb-2" />
               <div className="text-3xl font-bold text-gray-900">{analytics.total_files}</div>
               <div className="text-sm text-gray-500 mt-1">Файлов</div>
+              {analytics.documents_without_files > 0 && (
+                <div className="text-xs text-orange-600 mt-1">
+                  {analytics.documents_without_files} док. без файлов
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -104,10 +111,33 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
               <Icon name="Layers" size={24} className="mx-auto text-purple-600 mb-2" />
               <div className="text-3xl font-bold text-gray-900">{analytics.by_section.length}</div>
               <div className="text-sm text-gray-500 mt-1">Разделов</div>
+              {analytics.documents_with_multiple_files > 0 && (
+                <div className="text-xs text-blue-600 mt-1">
+                  {analytics.documents_with_multiple_files} док. с приложениями
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Информационная панель о файлах */}
+      {analytics.documents_without_files > 0 && (
+        <div className="p-4 border-2 border-orange-200 rounded-lg bg-orange-50">
+          <div className="flex items-start gap-3">
+            <Icon name="AlertCircle" size={18} className="text-orange-600 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-orange-900">
+                Файлов ({analytics.total_files}) меньше, чем документов ({analytics.total_documents})
+              </p>
+              <p className="text-xs text-orange-700 mt-1">
+                <strong>{analytics.documents_without_files} документов</strong> не имеют файлов в базе. 
+                Это может быть связано с ошибками загрузки или документы были добавлены до внедрения системы файлов.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Распределение по разделам */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

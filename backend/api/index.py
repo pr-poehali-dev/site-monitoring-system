@@ -311,6 +311,29 @@ def get_analytics(cursor, schema: str) -> dict:
     cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.document_files")
     total_files = cursor.fetchone()['total']
     
+    # Документы без файлов
+    cursor.execute(f"""
+        SELECT COUNT(*) as total 
+        FROM {schema}.documents d 
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {schema}.document_files f 
+            WHERE f.document_id = d.id
+        )
+    """)
+    documents_without_files = cursor.fetchone()['total']
+    
+    # Документы с несколькими файлами (приложения)
+    cursor.execute(f"""
+        SELECT COUNT(*) as total 
+        FROM (
+            SELECT document_id 
+            FROM {schema}.document_files 
+            GROUP BY document_id 
+            HAVING COUNT(*) > 1
+        ) sub
+    """)
+    documents_with_multiple_files = cursor.fetchone()['total']
+    
     cursor.execute(f"SELECT COALESCE(SUM(file_size), 0) as total_size FROM {schema}.documents")
     total_size_bytes = cursor.fetchone()['total_size']
     total_size_mb = round(total_size_bytes / (1024 * 1024), 2) if total_size_bytes else 0
@@ -322,6 +345,8 @@ def get_analytics(cursor, schema: str) -> dict:
         'by_publication_date': by_publication_date,
         'total_documents': total_documents,
         'total_files': total_files,
+        'documents_without_files': documents_without_files,
+        'documents_with_multiple_files': documents_with_multiple_files,
         'total_size_mb': total_size_mb
     }
 
