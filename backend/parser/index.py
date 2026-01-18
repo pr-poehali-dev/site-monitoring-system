@@ -620,20 +620,24 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
         fpath = ''
         cdn_url = ''
         
-        try:
-            fr = requests.get(file_url, headers=headers, timeout=8)
-            fc = fr.content
-            fsize = len(fc)
-            fhash = hashlib.sha256(fc).hexdigest()
-            
-            if s3 and fsize > 0 and aws_key:
-                fext = file_url.split('.')[-1].lower() if '.' in file_url else 'bin'
-                fname_part = f"{doc_num or 'unk'}_{file_type}_{fhash[:8]}"
-                fpath = f'docs/{section}/{fname_part}.{fext}'
-                s3.put_object(Bucket='files', Key=fpath, Body=fc, ContentType=get_ctype(fext))
-                cdn_url = f'https://cdn.poehali.dev/projects/{aws_key}/bucket/{fpath}'
-        except Exception:
+        # Если S3 отключен, используем URL как хеш (не скачиваем файл)
+        if not s3:
             fhash = hashlib.sha256(file_url.encode()).hexdigest()
+        else:
+            try:
+                fr = requests.get(file_url, headers=headers, timeout=8)
+                fc = fr.content
+                fsize = len(fc)
+                fhash = hashlib.sha256(fc).hexdigest()
+                
+                if fsize > 0 and aws_key:
+                    fext = file_url.split('.')[-1].lower() if '.' in file_url else 'bin'
+                    fname_part = f"{doc_num or 'unk'}_{file_type}_{fhash[:8]}"
+                    fpath = f'docs/{section}/{fname_part}.{fext}'
+                    s3.put_object(Bucket='files', Key=fpath, Body=fc, ContentType=get_ctype(fext))
+                    cdn_url = f'https://cdn.poehali.dev/projects/{aws_key}/bucket/{fpath}'
+            except Exception:
+                fhash = hashlib.sha256(file_url.encode()).hexdigest()
         
         all_files.append({
             'url': file_url,
