@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Brush, ReferenceArea } from 'recharts';
 
 interface AnalyticsTabProps {
   analytics: {
@@ -29,7 +29,14 @@ const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
   const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
-  const [zoomRange, setZoomRange] = useState<'all' | '1year' | '6months' | '3months' | '1month'>('all');
+  const [refAreaLeft, setRefAreaLeft] = useState<string>('');
+  const [refAreaRight, setRefAreaRight] = useState<string>('');
+  const [chartData, setChartData] = useState<any[]>([]);
+  const [left, setLeft] = useState<number>(0);
+  const [right, setRight] = useState<number>(0);
+  const [top, setTop] = useState<number>(0);
+  const [bottom, setBottom] = useState<number>(0);
+  
   console.log('AnalyticsTab render:', analytics);
   
   if (!analytics) {
@@ -67,27 +74,60 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
   const yearChartData = getYearChartData();
   const totalInYearChart = yearChartData.reduce((sum, item) => sum + item.count, 0);
 
-  // Фильтрация данных динамики публикаций по выбранному периоду
-  const getPublicationChartData = () => {
-    if (!analytics) return [];
+  // Инициализация данных графика
+  const fullData = analytics?.by_publication_date || [];
+  const displayData = chartData.length > 0 ? chartData : fullData;
+
+  // Zoom функции
+  const zoom = () => {
+    if (refAreaLeft === refAreaRight || refAreaRight === '') {
+      setRefAreaLeft('');
+      setRefAreaRight('');
+      return;
+    }
+
+    // Находим индексы для zoom
+    let leftIndex = fullData.findIndex((item) => item.date === refAreaLeft);
+    let rightIndex = fullData.findIndex((item) => item.date === refAreaRight);
+
+    if (leftIndex === -1 || rightIndex === -1) return;
+
+    // Меняем местами если выбрали справа налево
+    if (leftIndex > rightIndex) {
+      [leftIndex, rightIndex] = [rightIndex, leftIndex];
+    }
+
+    // Проверяем минимальный диапазон (30 дней)
+    const minRange = 30;
+    if (rightIndex - leftIndex < minRange) {
+      alert(`Минимальный диапазон для масштабирования: ${minRange} дней`);
+      setRefAreaLeft('');
+      setRefAreaRight('');
+      return;
+    }
+
+    // Обновляем данные
+    const newData = fullData.slice(leftIndex, rightIndex + 1);
+    const counts = newData.map((item) => item.count);
     
-    const now = new Date();
-    const data = analytics.by_publication_date;
-    
-    if (zoomRange === 'all') return data;
-    
-    const daysMap: Record<string, number> = {
-      '1month': 30,
-      '3months': 90,
-      '6months': 180,
-      '1year': 365
-    };
-    
-    const daysToShow = daysMap[zoomRange];
-    return data.slice(-daysToShow);
+    setChartData(newData);
+    setLeft(leftIndex);
+    setRight(rightIndex);
+    setRefAreaLeft('');
+    setRefAreaRight('');
+    setTop(Math.max(...counts));
+    setBottom(Math.min(...counts));
   };
 
-  const publicationChartData = getPublicationChartData();
+  const zoomOut = () => {
+    setChartData([]);
+    setLeft(0);
+    setRight(0);
+    setTop(0);
+    setBottom(0);
+    setRefAreaLeft('');
+    setRefAreaRight('');
+  };
 
   return (
     <div className="space-y-6">
@@ -328,63 +368,49 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
       {/* Динамика публикаций */}
       <Card>
         <CardHeader>
-          <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
             <div>
               <CardTitle>Динамика публикаций документов</CardTitle>
-              <CardDescription>Количество опубликованных документов по дням (последние 5 лет = {analytics.by_publication_date.length} дней)</CardDescription>
+              <CardDescription>
+                {chartData.length > 0 
+                  ? `Показано ${displayData.length} дней из ${fullData.length} (приближено)`
+                  : `Последние 5 лет = ${fullData.length} дней`
+                }
+              </CardDescription>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="text-sm text-gray-600 mr-2 flex items-center">Период:</span>
+            {chartData.length > 0 && (
               <Button 
-                variant={zoomRange === 'all' ? 'default' : 'outline'}
+                variant="outline" 
                 size="sm"
-                onClick={() => setZoomRange('all')}
+                onClick={zoomOut}
               >
-                <Icon name="Maximize2" size={14} className="mr-1" />
-                Всё (5 лет)
+                <Icon name="ZoomOut" size={14} className="mr-1" />
+                Сбросить zoom
               </Button>
-              <Button 
-                variant={zoomRange === '1year' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setZoomRange('1year')}
-              >
-                1 год
-              </Button>
-              <Button 
-                variant={zoomRange === '6months' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setZoomRange('6months')}
-              >
-                6 месяцев
-              </Button>
-              <Button 
-                variant={zoomRange === '3months' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setZoomRange('3months')}
-              >
-                3 месяца
-              </Button>
-              <Button 
-                variant={zoomRange === '1month' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setZoomRange('1month')}
-              >
-                1 месяц
-              </Button>
-            </div>
+            )}
           </div>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={publicationChartData}>
+            <LineChart 
+              data={displayData}
+              onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
+              onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
+              onMouseUp={zoom}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis 
-                dataKey="date" 
-                tick={zoomRange === 'all' ? false : { fontSize: 10, angle: -45, textAnchor: 'end' }}
-                height={zoomRange === 'all' ? 30 : 80}
-                label={zoomRange === 'all' ? { value: 'Дата', position: 'insideBottom', offset: -5, style: { fontSize: 12 } } : undefined}
+                dataKey="date"
+                allowDataOverflow
+                domain={[left, right]}
+                tick={displayData.length > 365 ? false : { fontSize: 10, angle: -45, textAnchor: 'end' }}
+                height={displayData.length > 365 ? 30 : 80}
               />
-              <YAxis tick={{ fontSize: 12 }} />
+              <YAxis 
+                allowDataOverflow
+                domain={[bottom, top]}
+                tick={{ fontSize: 12 }}
+              />
               <Tooltip 
                 contentStyle={{ 
                   backgroundColor: 'white', 
@@ -397,10 +423,19 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
                 type="monotone" 
                 dataKey="count" 
                 stroke="#f59e0b" 
-                strokeWidth={zoomRange === 'all' ? 1 : 2}
-                dot={zoomRange === '1month' || zoomRange === '3months'}
-                name="Документов"
+                strokeWidth={displayData.length < 180 ? 2 : 1}
+                dot={displayData.length < 90}
+                animationDuration={300}
               />
+              {refAreaLeft && refAreaRight && (
+                <ReferenceArea
+                  x1={refAreaLeft}
+                  x2={refAreaRight}
+                  strokeOpacity={0.3}
+                  fill="#3b82f6"
+                  fillOpacity={0.3}
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
 
@@ -419,12 +454,12 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
             </div>
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
               <div className="flex items-start gap-3">
-                <Icon name="ZoomIn" size={18} className="text-green-600 mt-0.5" />
+                <Icon name="MousePointer2" size={18} className="text-green-600 mt-0.5" />
                 <div className="text-sm text-green-900">
-                  <p className="font-medium mb-1">Масштабирование графика</p>
+                  <p className="font-medium mb-1">Интерактивное масштабирование</p>
                   <p className="text-xs text-green-700">
-                    Выберите период для детального просмотра. На больших периодах (1-5 лет) точки скрыты для лучшей читаемости.
-                    На коротких периодах (1-3 месяца) точки видны для точности.
+                    🖱️ <strong>Выделите область мышью</strong> для увеличения (зажмите и протяните).
+                    Минимальный диапазон: 30 дней. Нажмите "Сбросить zoom" для возврата к полному обзору.
                   </p>
                 </div>
               </div>
