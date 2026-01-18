@@ -142,5 +142,29 @@ export const apiClient = {
     
     if (!response.ok) throw new Error('Failed to clean logs');
     return response.json();
+  },
+
+  async getFileDownloadStats() {
+    const queryParams = new URLSearchParams({ endpoint: 'file_download_stats' });
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) throw new Error('Failed to get file download stats');
+    return response.json();
+  },
+
+  async retryFailedDownloads() {
+    const queryParams = new URLSearchParams({ endpoint: 'retry_failed_downloads' });
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) throw new Error('Failed to retry downloads');
+    return response.json();
   }
 };

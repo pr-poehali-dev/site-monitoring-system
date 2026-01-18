@@ -54,6 +54,8 @@ def handler(event: dict, context) -> dict:
                 result = get_parsing_progress(cursor, schema)
             elif endpoint == 'analytics':
                 result = get_analytics(cursor, schema)
+            elif endpoint == 'file_download_stats':
+                result = get_file_download_stats(cursor, schema)
             else:
                 cursor.close()
                 conn.close()
@@ -75,6 +77,12 @@ def handler(event: dict, context) -> dict:
                 body = json.loads(event.get('body', '{}'))
                 days = body.get('days', 7)
                 result = clean_old_logs(cursor, schema, days)
+                conn.commit()
+                cursor.close()
+                conn.close()
+                return success_response(result)
+            elif endpoint == 'retry_failed_downloads':
+                result = retry_failed_downloads(cursor, schema)
                 conn.commit()
                 cursor.close()
                 conn.close()
@@ -311,13 +319,13 @@ def get_analytics(cursor, schema: str) -> dict:
     cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.document_files")
     total_files = cursor.fetchone()['total']
     
-    # Документы без файлов
+    # Документы без файлов (учитываем новую структуру с download_status)
     cursor.execute(f"""
         SELECT COUNT(*) as total 
         FROM {schema}.documents d 
         WHERE NOT EXISTS (
             SELECT 1 FROM {schema}.document_files f 
-            WHERE f.document_id = d.id
+            WHERE f.document_id = d.id AND f.download_status = 'downloaded'
         )
     """)
     documents_without_files = cursor.fetchone()['total']
@@ -433,6 +441,48 @@ def clean_old_logs(cursor, schema: str, days: int = 7) -> dict:
         'deleted': deleted_count,
         'days': days,
         'message': f'Удалено {deleted_count} старых логов (старше {days} дней)'
+    }
+
+
+def get_file_download_stats(cursor, schema: str) -> dict:
+    """Получение статистики по загрузке файлов"""
+    # Всего файлов по статусам
+    cursor.execute(f"""
+        SELECT download_status, COUNT(*) as count
+        FROM {schema}.document_files
+        GROUP BY download_status
+    """)
+    status_counts = {row['download_status']: row['count'] for row in cursor.fetchall()}
+    
+    total_files = sum(status_counts.values())
+    downloaded = status_counts.get('downloaded', 0)
+    pending = status_counts.get('pending', 0)
+    failed = status_counts.get('failed', 0)
+    
+    return {
+        'total_files': total_files,
+        'downloaded': downloaded,
+        'pending': pending,
+        'failed': failed,
+        'status_counts': status_counts
+    }
+
+
+def retry_failed_downloads(cursor, schema: str) -> dict:
+    """Сброс статуса для повторной попытки загрузки файлов"""
+    # Обновляем статус pending -> можно будет загрузить через parser
+    cursor.execute(f"""
+        UPDATE {schema}.document_files
+        SET download_status = 'pending'
+        WHERE download_status IN ('pending', 'failed')
+            OR (download_status = 'downloaded' AND (file_cdn_url IS NULL OR file_cdn_url = ''))
+    """)
+    
+    updated_count = cursor.rowcount
+    
+    return {
+        'updated': updated_count,
+        'message': f'Помечено {updated_count} файлов для повторной загрузки'
     }
 
 
