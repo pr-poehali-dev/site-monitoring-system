@@ -100,12 +100,13 @@ export const apiClient = {
     return response.json();
   },
 
-  async continueParsing() {
+  async continueParsing(autoLoop: boolean = false) {
     const response = await fetch(PARSER_BASE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'continue_parsing'
+        action: 'continue_parsing',
+        auto_loop: autoLoop
       })
     });
     

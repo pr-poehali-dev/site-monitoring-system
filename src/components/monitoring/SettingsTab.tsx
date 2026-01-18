@@ -12,8 +12,6 @@ interface SettingsTabProps {
   handleSaveSettings: () => void;
   handleRunParser: () => void;
   handleContinueParsing: () => void;
-  autoContinue: boolean;
-  setAutoContinue: (value: boolean) => void;
   loading: boolean;
 }
 
@@ -23,13 +21,11 @@ const SettingsTab = ({
   handleSaveSettings,
   handleRunParser,
   handleContinueParsing,
-  autoContinue,
-  setAutoContinue,
   loading
 }: SettingsTabProps) => {
   return (
     <div className="space-y-6">
-      <ParsingProgress autoRefresh={autoContinue} />
+      <ParsingProgress autoRefresh={true} />
     <Card>
       <CardHeader>
         <CardTitle>Настройки мониторинга</CardTitle>
@@ -65,18 +61,13 @@ const SettingsTab = ({
         <div className="space-y-4">
           <h3 className="font-semibold text-gray-900 pt-4 border-t">Парсинг</h3>
           
-          <div className="flex items-center justify-between p-4 border rounded-lg">
-            <div className="space-y-1">
-              <Label htmlFor="auto-continue" className="text-base">Автопродолжение парсинга</Label>
-              <p className="text-sm text-gray-500">Автоматически продолжать незавершённые задачи</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {autoContinue && <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />}
-              <Switch 
-                id="auto-continue" 
-                checked={autoContinue} 
-                onCheckedChange={setAutoContinue}
-              />
+          <div className="p-4 border rounded-lg bg-blue-50 border-blue-200">
+            <div className="flex items-start gap-3">
+              <Icon name="Info" size={18} className="text-blue-600 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-blue-900">Автономный режим</p>
+                <p className="text-xs text-blue-700">Парсинг работает в фоне на сервере. Можно закрыть страницу — процесс продолжится автоматически до завершения.</p>
+              </div>
             </div>
           </div>
         </div>

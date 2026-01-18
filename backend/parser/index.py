@@ -15,6 +15,7 @@ MAX_DOCS_PER_RUN = 100
 MAX_PAGES_PER_RUN = 30
 INITIAL_DELAY = 0.5
 MAX_DELAY = 5.0
+PARSER_BASE_URL = os.environ.get('PARSER_URL', 'https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c')
 
 def handler(event: dict, context) -> dict:
     """API для парсинга документов с умными повторными попытками"""
@@ -68,7 +69,8 @@ def handler(event: dict, context) -> dict:
                 return success_response(result)
             
             elif action == 'continue_parsing':
-                result = continue_parsing(conn, schema)
+                auto_loop = body.get('auto_loop', False)
+                result = continue_parsing(conn, schema, auto_loop)
                 conn.commit()
                 conn.close()
                 return success_response(result)
@@ -100,10 +102,26 @@ def parse_docs(conn, schema: str, sections: list, years: list) -> dict:
     # Сортируем годы от свежих к старым (2026, 2025, 2024...)
     sorted_years = sorted(years, reverse=True)
     
+    # Создаём состояния для ВСЕХ комбинаций раздел+год заранее
+    for section in sorted_sections:
+        for year in sorted_years:
+            cursor.execute(
+                f"SELECT id FROM {schema}.parsing_state WHERE section = %s AND year = %s",
+                (section, year)
+            )
+            if not cursor.fetchone():
+                cursor.execute(
+                    f"INSERT INTO {schema}.parsing_state (section, year, page, status, retry_count) VALUES (%s, %s, 1, 'pending', 0)",
+                    (section, year)
+                )
+    conn.commit()
+    
     main_log_id = None
     try:
+        start_msg = f'Разделов: {len(sorted_sections)} | Годов: {len(sorted_years)}\nПорядок: {", ".join(sorted_sections)}\nОт {sorted_years[0]} до {sorted_years[-1]} года'
         main_log_id = log_create(cursor, schema, 'system', 'info', 
-            f'🚀 ПАРСИНГ ЗАПУЩЕН | Разделов: {len(sorted_sections)} | Годов: {len(sorted_years)} | Порядок: {", ".join(sorted_sections)} → от {sorted_years[0]} до {sorted_years[-1]}')
+            f'🚀 ПАРСИНГ ЗАПУЩЕН | {start_msg}')
+        send_tg_parsing_event(cursor, schema, 'started', start_msg)
         conn.commit()
     except Exception as e:
         cursor.close()
@@ -327,8 +345,22 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         if pending == 0:
             cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.parsing_state")
             total = cursor.fetchone()['total']
+            
+            cursor.execute(f"SELECT COUNT(*) as total_docs FROM {schema}.documents")
+            total_docs = cursor.fetchone()['total_docs']
+            
+            cursor.execute(f"""
+                SELECT section, COUNT(*) as cnt 
+                FROM {schema}.documents 
+                GROUP BY section
+            """)
+            by_section = cursor.fetchall()
+            section_stats = '\n'.join([f"• {row['section']}: {row['cnt']} док." for row in by_section])
+            
+            final_msg = f'Обработано задач: {total}\n\n📊 Собрано документов: {total_docs}\n\n{section_stats}'
             log_create(cursor, schema, 'system', 'success', 
-                f'🎉 ПАРСИНГ ПОЛНОСТЬЮ ЗАВЕРШЁН! Обработано разделов/годов: {total}')
+                f'🎉 ПАРСИНГ ПОЛНОСТЬЮ ЗАВЕРШЁН!\n{final_msg}')
+            send_tg_parsing_event(cursor, schema, 'completed', final_msg, {'total_docs': total_docs})
             conn.commit()
         
         cursor.close()
@@ -535,7 +567,7 @@ def get_ctype(ext: str) -> str:
     return types.get(ext, 'application/octet-stream')
 
 
-def continue_parsing(conn, schema: str) -> dict:
+def continue_parsing(conn, schema: str, auto_loop: bool = False) -> dict:
     """Автоматическое продолжение незавершённых парсингов с приоритетом"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -568,8 +600,21 @@ def continue_parsing(conn, schema: str) -> dict:
         total_count = cursor.fetchone()['total']
         
         if completed_count > 0 and completed_count == total_count:
+            cursor.execute(f"SELECT COUNT(*) as total_docs FROM {schema}.documents")
+            total_docs = cursor.fetchone()['total_docs']
+            
+            cursor.execute(f"""
+                SELECT section, COUNT(*) as cnt 
+                FROM {schema}.documents 
+                GROUP BY section
+            """)
+            by_section = cursor.fetchall()
+            section_stats = '\n'.join([f"• {row['section']}: {row['cnt']} док." for row in by_section])
+            
+            final_msg = f'Обработано задач: {total_count}\n\n📊 Собрано документов: {total_docs}\n\n{section_stats}'
             log_create(cursor, schema, 'system', 'success', 
-                f'🎉 ПАРСИНГ ПОЛНОСТЬЮ ЗАВЕРШЕН! Обработано разделов/годов: {total_count}')
+                f'🎉 ПАРСИНГ ПОЛНОСТЬЮ ЗАВЕРШЕН!\n{final_msg}')
+            send_tg_parsing_event(cursor, schema, 'completed', final_msg, {'total_docs': total_docs})
             conn.commit()
             cursor.close()
             return {'status': 'all_completed', 'message': '🎉 Парсинг полностью завершён!', 'total_tasks': total_count}
@@ -586,6 +631,21 @@ def continue_parsing(conn, schema: str) -> dict:
     conn.commit()
     
     result = parse_single_year(conn, schema, section, year)
+    
+    # Если включён режим авто-цикла, запускаем следующую итерацию
+    if auto_loop:
+        cursor.execute(f"SELECT COUNT(*) as pending FROM {schema}.parsing_state WHERE status IN ('running', 'retry', 'pending')")
+        pending = cursor.fetchone()['pending']
+        
+        if pending > 0:
+            try:
+                requests.post(
+                    PARSER_BASE_URL,
+                    json={'action': 'continue_parsing', 'auto_loop': True},
+                    timeout=2
+                )
+            except:
+                pass
     
     cursor.close()
     return {
@@ -628,7 +688,7 @@ def monitor(conn, schema: str) -> dict:
 
 
 def send_tg(token: str, cid: str, change: dict):
-    """Telegram"""
+    """Telegram уведомление об изменении документа"""
     emoji = {'new': '🆕', 'modified': '✏️'}.get(change['change_type'], '📄')
     msg = f"{emoji} *{change['change_type'].upper()}*\n\n*{change['title'][:200]}*\nРаздел: {change['section']}\nДата: {change['detected_at'].strftime('%d.%m.%Y %H:%M')}\n[Открыть]({change['url']})"
     requests.post(
@@ -636,6 +696,57 @@ def send_tg(token: str, cid: str, change: dict):
         json={'chat_id': cid, 'text': msg, 'parse_mode': 'Markdown', 'disable_web_page_preview': True},
         timeout=10
     )
+
+
+def send_tg_parsing_event(cursor, schema: str, event_type: str, message: str, stats: dict = None):
+    """Отправка уведомления о событии парсинга в Telegram"""
+    try:
+        token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+        if not token:
+            return
+        
+        cursor.execute(f"SELECT value FROM {schema}.monitoring_settings WHERE key = 'telegram_chat_id'")
+        r = cursor.fetchone()
+        cid = r['value'] if r else ''
+        
+        if not cid:
+            return
+        
+        if event_type == 'started':
+            emoji = '🚀'
+            title = 'ПАРСИНГ ЗАПУЩЕН'
+        elif event_type == 'completed':
+            emoji = '🎉'
+            title = 'ПАРСИНГ ЗАВЕРШЁН'
+        elif event_type == 'year_completed':
+            emoji = '✅'
+            title = 'ГОД ЗАВЕРШЁН'
+        else:
+            emoji = 'ℹ️'
+            title = 'СОБЫТИЕ'
+        
+        msg = f"{emoji} *{title}*\n\n{message}"
+        
+        if stats:
+            msg += f"\n\n📊 *Статистика:*"
+            if 'new' in stats:
+                msg += f"\n🆕 Новых: {stats['new']}"
+            if 'upd' in stats:
+                msg += f"\n✏️ Изменено: {stats['upd']}"
+            if 'skip' in stats:
+                msg += f"\n⏭ Без изменений: {stats['skip']}"
+            if 'total_docs' in stats:
+                msg += f"\n📄 Всего документов: {stats['total_docs']}"
+            if 'errors' in stats and stats['errors'] > 0:
+                msg += f"\n❌ Ошибок: {stats['errors']}"
+        
+        requests.post(
+            f'https://api.telegram.org/bot{token}/sendMessage',
+            json={'chat_id': cid, 'text': msg, 'parse_mode': 'Markdown'},
+            timeout=10
+        )
+    except Exception:
+        pass
 
 
 def log_create(cursor, schema: str, section: str, status: str, message: str) -> int:

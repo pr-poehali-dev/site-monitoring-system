@@ -31,7 +31,6 @@ const Index = () => {
   const [telegramChatId, setTelegramChatId] = useState('');
   const [activeTab, setActiveTab] = useState('documents');
   const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
-  const [autoContinue, setAutoContinue] = useState(false);
   const { toast } = useToast();
 
   const currentYear = new Date().getFullYear();
@@ -67,20 +66,6 @@ const Index = () => {
       return () => clearInterval(interval);
     }
   }, [autoRefreshLogs]);
-
-  useEffect(() => {
-    if (autoContinue) {
-      const interval = setInterval(async () => {
-        try {
-          await apiClient.continueParsing();
-        } catch (error) {
-          console.error('Failed to continue parsing:', error);
-        }
-      }, 35000);
-
-      return () => clearInterval(interval);
-    }
-  }, [autoContinue]);
 
   const loadAllData = async () => {
     try {
@@ -157,11 +142,15 @@ const Index = () => {
     setAutoRefreshLogs(true);
     
     try {
-      apiClient.runParser(['postanovleniya', 'rasporyazheniya', 'programmy'], years.map(y => parseInt(y)));
+      await apiClient.runParser(['programmy', 'rasporyazheniya', 'postanovleniya'], years.map(y => parseInt(y)));
+      
+      setTimeout(() => {
+        apiClient.continueParsing(true);
+      }, 2000);
       
       toast({
         title: 'Парсинг запущен в фоне',
-        description: `Система начала сканирование документов за ${years.length} лет (2009-${currentYear}). Логи обновляются автоматически.`
+        description: `Система работает автономно. Можно закрыть страницу — парсинг продолжится до конца. Уведомления придут в Telegram.`
       });
     } catch (error) {
       toast({
@@ -180,7 +169,7 @@ const Index = () => {
     setAutoRefreshLogs(true);
     
     try {
-      const result = await apiClient.continueParsing();
+      const result = await apiClient.continueParsing(true);
       
       if (result.status === 'all_completed') {
         toast({
@@ -194,8 +183,8 @@ const Index = () => {
         });
       } else {
         toast({
-          title: 'Продолжение парсинга',
-          description: `Обрабатывается: ${result.section || ''}, ${result.year || ''} год`,
+          title: 'Парсинг продолжается в фоне',
+          description: 'Можно закрыть страницу — парсинг продолжится автоматически до конца.',
         });
       }
     } catch (error) {
@@ -374,8 +363,6 @@ const Index = () => {
               handleSaveSettings={handleSaveSettings}
               handleRunParser={handleRunParser}
               handleContinueParsing={handleContinueParsing}
-              autoContinue={autoContinue}
-              setAutoContinue={setAutoContinue}
               loading={loading}
             />
           </TabsContent>
