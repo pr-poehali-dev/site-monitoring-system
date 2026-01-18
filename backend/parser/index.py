@@ -15,6 +15,8 @@ MAX_DOCS_PER_RUN = 200
 MAX_PAGES_PER_RUN = 50
 INITIAL_DELAY = 1.5
 MAX_DELAY = 10.0
+MAX_ITERATIONS_PER_YEAR = 20  # Максимум 20 итераций на год (защита от бесконечных циклов)
+EMPTY_PAGES_THRESHOLD = 3  # Сколько пустых страниц подряд = конец данных
 PARSER_BASE_URL = os.environ.get('PARSER_URL', 'https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c')
 
 def handler(event: dict, context) -> dict:
@@ -243,10 +245,25 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
             conn.commit()
         elif state['status'] == 'completed':
             log_create(cursor, schema, section, 'info', 
-                f'✓ Раздел {section_name}, год {year} уже обработан ранее')
+                f'✓ Раздел {section_name}, год {year} уже обработан ранее (все страницы загружены)')
             conn.commit()
             cursor.close()
             return {'total_processed': 0, 'new_documents': 0, 'updated_documents': 0, 'errors': 0}
+        elif state['status'] == 'failed':
+            log_create(cursor, schema, section, 'error', 
+                f'❌ Раздел {section_name}, год {year} в статусе FAILED. Ошибка: {state.get("last_error", "неизвестно")}')
+            conn.commit()
+            cursor.close()
+            return {'total_processed': 0, 'new_documents': 0, 'updated_documents': 0, 'errors': 1}
+        elif state['status'] == 'partial':
+            # Продолжаем парсинг со следующей страницы
+            log_create(cursor, schema, section, 'info', 
+                f'🔄 Продолжение парсинга {section_name}, год {year} со страницы {state.get("page", 1)}')
+            cursor.execute(
+                f"UPDATE {schema}.parsing_state SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
+                (section, year)
+            )
+            conn.commit()
         else:
             cursor.execute(
                 f"UPDATE {schema}.parsing_state SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
@@ -256,9 +273,23 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         
         retry_count = state['retry_count']
         start_page = state.get('page', 1)
+        iteration_count = state.get('retry_count', 0)  # Используем retry_count как счётчик итераций
+        
+        # Защита от бесконечных итераций
+        if iteration_count >= MAX_ITERATIONS_PER_YEAR:
+            error_msg = f'Достигнут лимит итераций ({MAX_ITERATIONS_PER_YEAR}) для года {year}. Парсинг остановлен.'
+            cursor.execute(
+                f"UPDATE {schema}.parsing_state SET status = 'failed', last_error = %s, updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
+                (error_msg, section, year)
+            )
+            conn.commit()
+            log_create(cursor, schema, section, 'error', f'❌ {error_msg}')
+            conn.commit()
+            cursor.close()
+            return {'total_processed': 0, 'new_documents': 0, 'updated_documents': 0, 'errors': 1}
         
         log_create(cursor, schema, section, 'info', 
-            f'📂 Парсинг: {section_name}, год {year} (попытка {retry_count + 1}/{MAX_RETRY}, стартовая страница: {start_page})')
+            f'📂 Парсинг: {section_name}, год {year} (итерация {iteration_count + 1}/{MAX_ITERATIONS_PER_YEAR}, стартовая страница: {start_page})')
         conn.commit()
         
         stats = {'new': 0, 'upd': 0, 'skip': 0, 'errors': 0, 'docs_processed': 0}
@@ -279,13 +310,39 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         # Максимальное время работы — 25 секунд (оставляем запас до таймаута 30 сек)
         max_execution_time = 25
         
+        empty_pages_count = 0  # Счётчик пустых страниц подряд
+        
         while page <= MAX_PAGES_PER_RUN and stats['docs_processed'] < MAX_DOCS_PER_RUN:
             # Проверяем время выполнения перед обработкой страницы
             elapsed = time.time() - t1
             if elapsed > max_execution_time:
-                log_create(cursor, schema, section, 'warning', 
-                    f'⏱ Достигнут лимит времени ({elapsed:.1f}с), сохраняю прогресс на странице {page}')
+                # Сохраняем текущую страницу (НЕ page+1) и статус 'partial'
+                cursor.execute(
+                    f"UPDATE {schema}.parsing_state SET page = %s, status = 'partial', retry_count = %s, updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
+                    (page, iteration_count + 1, section, year)
+                )
                 conn.commit()
+                log_create(cursor, schema, section, 'warning', 
+                    f'⏱ Лимит времени ({elapsed:.1f}с), статус PARTIAL. Продолжу со страницы {page} в следующей итерации.')
+                conn.commit()
+                
+                # Автоматический рекурсивный вызов парсера
+                try:
+                    log_create(cursor, schema, section, 'info', 
+                        f'🔄 Автозапуск следующей итерации для {section_name}, год {year}')
+                    conn.commit()
+                    cursor.close()
+                    
+                    # Вызываем парсер через HTTP (самого себя)
+                    requests.post(PARSER_BASE_URL, 
+                        json={'action': 'parse', 'sections': [section], 'years': [year]},
+                        timeout=2  # Не ждём ответа, fire-and-forget
+                    )
+                except:
+                    pass  # Игнорируем ошибки HTTP-вызова
+                
+                return {'total_processed': stats['docs_processed'], 'new_documents': stats['new'], 
+                        'updated_documents': stats['upd'], 'errors': stats['errors'], 'status': 'partial'}
                 break
             url = base_section_url if page == 1 else urljoin(base_section_url, f"page/{page}/")
             
@@ -333,10 +390,24 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                             conn.commit()
             
             if not items:
+                empty_pages_count += 1
                 log_create(cursor, schema, section, 'info', 
-                    f'✓ Документов больше нет (страница {page}), год завершен')
+                    f'⚪️ Пустая страница {page} ({empty_pages_count}/{EMPTY_PAGES_THRESHOLD})')
                 conn.commit()
-                break
+                
+                # Если 3 пустые страницы подряд — данные закончились
+                if empty_pages_count >= EMPTY_PAGES_THRESHOLD:
+                    log_create(cursor, schema, section, 'info', 
+                        f'✅ Данных больше нет ({EMPTY_PAGES_THRESHOLD} пустых страниц подряд), год завершен')
+                    conn.commit()
+                    break
+                
+                # Пробуем следующую страницу (возможно пропуск в нумерации)
+                page += 1
+                continue
+            
+            # Если нашли документы — сбрасываем счётчик пустых страниц
+            empty_pages_count = 0
             
             pg_new = 0
             pg_upd = 0
@@ -399,42 +470,66 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
             
             page += 1
         
-        # Успешно завершили
-        cursor.execute(
-            f"UPDATE {schema}.parsing_state SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
-            (section, year)
-        )
-        conn.commit()
-        
+        # Проверяем: завершён ли год ПОЛНОСТЬЮ или по таймауту/лимиту
         dur = int((time.time() - t1) * 1000)
-        msg = f"✅ ГОД ЗАВЕРШЕН: {year}\nНовых: {stats['new']}, Изменено: {stats['upd']}, Без изменений: {stats['skip']}, Ошибок: {stats['errors']}\nВремя: {dur}мс"
-        log_create(cursor, schema, section, 'success', msg)
-        conn.commit()
+        is_fully_completed = (empty_pages_count >= EMPTY_PAGES_THRESHOLD) or (page > MAX_PAGES_PER_RUN)
         
-        # Проверяем, не завершились ли ВСЕ парсинги
-        cursor.execute(f"SELECT COUNT(*) as pending FROM {schema}.parsing_state WHERE status != 'completed'")
-        pending = cursor.fetchone()['pending']
-        
-        if pending == 0:
-            cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.parsing_state")
-            total = cursor.fetchone()['total']
-            
-            cursor.execute(f"SELECT COUNT(*) as total_docs FROM {schema}.documents")
-            total_docs = cursor.fetchone()['total_docs']
-            
-            cursor.execute(f"""
-                SELECT section, COUNT(*) as cnt 
-                FROM {schema}.documents 
-                GROUP BY section
-            """)
-            by_section = cursor.fetchall()
-            section_stats = '\n'.join([f"• {row['section']}: {row['cnt']} док." for row in by_section])
-            
-            final_msg = f'Обработано задач: {total}\n\n📊 Собрано документов: {total_docs}\n\n{section_stats}'
-            log_create(cursor, schema, 'system', 'success', 
-                f'🎉 ПАРСИНГ ПОЛНОСТЬЮ ЗАВЕРШЁН!\n{final_msg}')
-            send_tg_parsing_event(cursor, schema, 'completed', final_msg, {'total_docs': total_docs})
+        if is_fully_completed:
+            # ВСЕ данные загружены — финальный статус 'completed'
+            msg = f"✅ ГОД ПОЛНОСТЬЮ ЗАВЕРШЁН: {year}\nНовых: {stats['new']}, Изменено: {stats['upd']}, Без изменений: {stats['skip']}, Ошибок: {stats['errors']}\nВремя: {dur}мс"
+            log_create(cursor, schema, section, 'success', msg)
+            cursor.execute(
+                f"UPDATE {schema}.parsing_state SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
+                (section, year)
+            )
             conn.commit()
+        else:
+            # Данные могут быть ещё, но достигнут лимит документов/страниц
+            msg = f"⚠️ ГОД ЧАСТИЧНО ЗАВЕРШЁН: {year} (достигнут лимит)\nНовых: {stats['new']}, Изменено: {stats['upd']}, Без изменений: {stats['skip']}, Ошибок: {stats['errors']}\nВремя: {dur}мс"
+            log_create(cursor, schema, section, 'warning', msg)
+            cursor.execute(
+                f"UPDATE {schema}.parsing_state SET page = %s, status = 'partial', retry_count = %s, updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
+                (page + 1, iteration_count + 1, section, year)
+            )
+            conn.commit()
+            
+            # Автозапуск следующей итерации
+            try:
+                log_create(cursor, schema, section, 'info', 
+                    f'🔄 Автозапуск следующей итерации для {section_name}, год {year}')
+                conn.commit()
+                requests.post(PARSER_BASE_URL, 
+                    json={'action': 'parse', 'sections': [section], 'years': [year]},
+                    timeout=2
+                )
+            except:
+                pass
+        
+        # Проверяем, не завершились ли ВСЕ парсинги (только если год полностью завершён)
+        if is_fully_completed:
+            cursor.execute(f"SELECT COUNT(*) as pending FROM {schema}.parsing_state WHERE status NOT IN ('completed', 'failed')")
+            pending = cursor.fetchone()['pending']
+            
+            if pending == 0:
+                cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.parsing_state")
+                total = cursor.fetchone()['total']
+                
+                cursor.execute(f"SELECT COUNT(*) as total_docs FROM {schema}.documents")
+                total_docs = cursor.fetchone()['total_docs']
+                
+                cursor.execute(f"""
+                    SELECT section, COUNT(*) as cnt 
+                    FROM {schema}.documents 
+                    GROUP BY section
+                """)
+                by_section = cursor.fetchall()
+                section_stats = '\n'.join([f"• {row['section']}: {row['cnt']} док." for row in by_section])
+                
+                final_msg = f'Обработано задач: {total}\n\n📊 Собрано документов: {total_docs}\n\n{section_stats}'
+                log_create(cursor, schema, 'system', 'success', 
+                    f'🎉 ПАРСИНГ ПОЛНОСТЬЮ ЗАВЕРШЁН!\n{final_msg}')
+                send_tg_parsing_event(cursor, schema, 'completed', final_msg, {'total_docs': total_docs})
+                conn.commit()
         
         cursor.close()
         return {
