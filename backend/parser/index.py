@@ -13,8 +13,8 @@ import boto3
 MAX_RETRY = 3
 MAX_DOCS_PER_RUN = 200
 MAX_PAGES_PER_RUN = 50
-INITIAL_DELAY = 0.5
-MAX_DELAY = 5.0
+INITIAL_DELAY = 1.5
+MAX_DELAY = 10.0
 PARSER_BASE_URL = os.environ.get('PARSER_URL', 'https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c')
 
 def handler(event: dict, context) -> dict:
@@ -739,7 +739,7 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
             return 'skip'
     else:
         cursor.execute(
-            f"INSERT INTO {schema}.documents (title, url, section, published_date, document_number, document_date, content_hash, file_size, file_path, file_cdn_url, changes_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0) RETURNING id",
+            f"INSERT INTO {schema}.documents (title, url, section, published_date, document_number, document_date, content_hash, file_size, file_path, file_cdn_url, changes_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0) ON CONFLICT (url) DO UPDATE SET last_checked_at = CURRENT_TIMESTAMP RETURNING id",
             (full_title, doc_url, section_name, pub_date, doc_num, doc_date, main_file['hash'], main_file['size'], main_file['path'], main_file['cdn_url'])
         )
         did = cursor.fetchone()['id']
