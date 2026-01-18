@@ -14,6 +14,7 @@ interface SettingsTabProps {
   handleRunParser: () => void;
   handleContinueParsing: () => void;
   handleForceReparse: () => void;
+  handleCleanLogs: () => void;
   loading: boolean;
 }
 
@@ -24,6 +25,7 @@ const SettingsTab = ({
   handleRunParser,
   handleContinueParsing,
   handleForceReparse,
+  handleCleanLogs,
   loading
 }: SettingsTabProps) => {
   return (
@@ -105,6 +107,20 @@ const SettingsTab = ({
           <p className="text-xs text-gray-500 text-center">
             ⚠️ Все документы будут спарсены заново (может занять ~1 час)
           </p>
+
+          <div className="pt-4 border-t">
+            <Button 
+              variant="outline" 
+              className="w-full"
+              onClick={handleCleanLogs}
+            >
+              <Icon name="Trash2" size={16} className="mr-2" />
+              Очистить старые логи
+            </Button>
+            <p className="text-xs text-gray-500 text-center mt-2">
+              Удалить логи парсинга старше 7 дней
+            </p>
+          </div>
         </div>
       </CardContent>
     </Card>

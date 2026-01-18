@@ -71,6 +71,14 @@ def handler(event: dict, context) -> dict:
                 cursor.close()
                 conn.close()
                 return success_response(result)
+            elif endpoint == 'clean_logs':
+                body = json.loads(event.get('body', '{}'))
+                days = body.get('days', 7)
+                result = clean_old_logs(cursor, schema, days)
+                conn.commit()
+                cursor.close()
+                conn.close()
+                return success_response(result)
         
         cursor.close()
         conn.close()
@@ -360,6 +368,22 @@ def update_settings(cursor, schema: str, body: dict) -> dict:
         updated.append(key)
     
     return {'updated': updated}
+
+
+def clean_old_logs(cursor, schema: str, days: int = 7) -> dict:
+    """Очистка старых логов парсинга"""
+    cursor.execute(f"""
+        DELETE FROM {schema}.parsing_logs
+        WHERE started_at < CURRENT_TIMESTAMP - INTERVAL '%s days'
+    """, (days,))
+    
+    deleted_count = cursor.rowcount
+    
+    return {
+        'deleted': deleted_count,
+        'days': days,
+        'message': f'Удалено {deleted_count} старых логов (старше {days} дней)'
+    }
 
 
 def success_response(data: dict) -> dict:

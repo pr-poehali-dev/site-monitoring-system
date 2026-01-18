@@ -254,6 +254,34 @@ const Index = () => {
     }
   };
 
+  const handleCleanLogs = async () => {
+    const confirmed = window.confirm(
+      'Удалить логи парсинга старше 7 дней?\n\n' +
+      'Это поможет очистить базу данных от старых записей.'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const result = await apiClient.cleanOldLogs(7);
+      
+      toast({
+        title: '🗑️ Логи очищены',
+        description: result.message || `Удалено ${result.deleted} записей`
+      });
+
+      setTimeout(() => {
+        loadAllData();
+      }, 1000);
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось очистить логи',
+        variant: 'destructive'
+      });
+    }
+  };
+
   const formatFileSize = (bytes: number) => {
     if (!bytes) return '-';
     const kb = bytes / 1024;
@@ -438,6 +466,7 @@ const Index = () => {
               handleRunParser={handleRunParser}
               handleContinueParsing={handleContinueParsing}
               handleForceReparse={handleForceReparse}
+              handleCleanLogs={handleCleanLogs}
               loading={loading}
             />
           </TabsContent>

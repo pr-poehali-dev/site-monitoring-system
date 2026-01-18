@@ -129,5 +129,18 @@ export const apiClient = {
     const response = await fetch(`${API_BASE_URL}?${queryParams}`);
     if (!response.ok) throw new Error('Failed to fetch analytics');
     return response.json();
+  },
+
+  async cleanOldLogs(days: number = 7) {
+    const queryParams = new URLSearchParams({ endpoint: 'clean_logs' });
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days })
+    });
+    
+    if (!response.ok) throw new Error('Failed to clean logs');
+    return response.json();
   }
 };
