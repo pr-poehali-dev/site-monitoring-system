@@ -1179,7 +1179,7 @@ def continue_parsing(conn, schema: str, auto_loop: bool = False) -> dict:
     # Если включён режим авто-цикла, запускаем следующую итерацию
     if auto_loop:
         cursor2 = conn.cursor(cursor_factory=RealDictCursor)
-        cursor2.execute(f"SELECT COUNT(*) as pending FROM {schema}.parsing_state WHERE status IN ('running', 'retry', 'pending')")
+        cursor2.execute(f"SELECT COUNT(*) as pending FROM {schema}.parsing_state WHERE status IN ('running', 'retry', 'pending', 'partial')")
         pending = cursor2.fetchone()['pending']
         cursor2.close()
         
