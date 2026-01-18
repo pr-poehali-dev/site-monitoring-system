@@ -739,7 +739,7 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
             return 'skip'
     else:
         cursor.execute(
-            f"INSERT INTO {schema}.documents (title, url, section, published_date, document_number, document_date, content_hash, file_size, file_path, file_cdn_url, changes_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0) ON CONFLICT (url) DO UPDATE SET last_checked_at = CURRENT_TIMESTAMP RETURNING id",
+            f"INSERT INTO {schema}.documents (title, url, section, published_date, document_number, document_date, content_hash, file_size, file_path, file_cdn_url, changes_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0) RETURNING id",
             (full_title, doc_url, section_name, pub_date, doc_num, doc_date, main_file['hash'], main_file['size'], main_file['path'], main_file['cdn_url'])
         )
         did = cursor.fetchone()['id']
