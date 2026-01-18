@@ -563,25 +563,40 @@ def process_doc_table(cursor, schema, row, section, section_name, base_url, page
     ex = cursor.fetchone()
     
     if ex:
-        # Проверяем изменения в любых полях
-        has_changes = (
-            ex['content_hash'] != main_file['hash'] or 
-            ex['file_size'] != main_file['size'] or
-            ex['title'] != title or
+        # Проверяем изменения только в значимых полях (контент, размер, заголовок)
+        content_changed = ex['content_hash'] != main_file['hash']
+        size_changed = ex['file_size'] != main_file['size']
+        title_changed = ex['title'] != title
+        
+        has_changes = content_changed or size_changed or title_changed
+        
+        # Обновляем метаданные (номер, даты) без создания записи изменения
+        metadata_changed = (
             ex['document_number'] != doc_num or
-            str(ex['document_date']) != str(doc_date) if doc_date else False or
-            str(ex['published_date']) != str(doc_date) if doc_date else False
+            str(ex['document_date']) != str(doc_date) or
+            str(ex['published_date']) != str(doc_date)
         )
         
-        if has_changes:
-            cursor.execute(
-                f"UPDATE {schema}.documents SET content_hash = %s, title = %s, file_size = %s, file_path = %s, file_cdn_url = %s, document_number = %s, document_date = %s, published_date = %s, updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, changes_count = changes_count + 1 WHERE id = %s",
-                (main_file['hash'], title, main_file['size'], main_file['path'], main_file['cdn_url'], doc_num, doc_date, doc_date, ex['id'])
-            )
-            cursor.execute(
-                f"INSERT INTO {schema}.document_changes (document_id, change_type, old_content_hash, new_content_hash, old_title, new_title, old_file_size, new_file_size) VALUES (%s, 'modified', %s, %s, %s, %s, %s, %s)",
-                (ex['id'], ex['content_hash'], main_file['hash'], ex['title'], title, ex['file_size'], main_file['size'])
-            )
+        if has_changes or metadata_changed:
+            # Обновляем документ (увеличиваем changes_count только при реальных изменениях)
+            if has_changes:
+                cursor.execute(
+                    f"UPDATE {schema}.documents SET content_hash = %s, title = %s, file_size = %s, file_path = %s, file_cdn_url = %s, document_number = %s, document_date = %s, published_date = %s, updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, changes_count = changes_count + 1 WHERE id = %s",
+                    (main_file['hash'], title, main_file['size'], main_file['path'], main_file['cdn_url'], doc_num, doc_date, doc_date, ex['id'])
+                )
+            else:
+                # Только метаданные изменились - не увеличиваем changes_count
+                cursor.execute(
+                    f"UPDATE {schema}.documents SET document_number = %s, document_date = %s, published_date = %s, last_checked_at = CURRENT_TIMESTAMP WHERE id = %s",
+                    (doc_num, doc_date, doc_date, ex['id'])
+                )
+            
+            # Записываем изменение только если есть значимые изменения (контент/размер/заголовок)
+            if content_changed or size_changed or title_changed:
+                cursor.execute(
+                    f"INSERT INTO {schema}.document_changes (document_id, change_type, old_content_hash, new_content_hash, old_title, new_title, old_file_size, new_file_size) VALUES (%s, 'modified', %s, %s, %s, %s, %s, %s)",
+                    (ex['id'], ex['content_hash'], main_file['hash'], ex['title'], title, ex['file_size'], main_file['size'])
+                )
             
             cursor.execute(f"DELETE FROM {schema}.document_files WHERE document_id = %s", (ex['id'],))
             for f in all_files:
