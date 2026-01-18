@@ -101,14 +101,15 @@ export const apiClient = {
   },
 
   async continueParsing() {
-    fetch(PARSER_BASE_URL, {
+    const response = await fetch(PARSER_BASE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'continue_parsing'
       })
-    }).catch(() => {});
+    });
     
-    return { status: 'continued' };
+    if (!response.ok) throw new Error('Failed to continue parsing');
+    return response.json();
   }
 };

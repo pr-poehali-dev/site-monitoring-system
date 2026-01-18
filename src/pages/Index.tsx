@@ -180,12 +180,24 @@ const Index = () => {
     setAutoRefreshLogs(true);
     
     try {
-      await apiClient.continueParsing();
+      const result = await apiClient.continueParsing();
       
-      toast({
-        title: 'Продолжение парсинга',
-        description: 'Система продолжит незавершённую задачу. Включите автопродолжение для полного сбора.'
-      });
+      if (result.status === 'all_completed') {
+        toast({
+          title: '🎉 Парсинг полностью завершён!',
+          description: result.message || 'Все разделы и годы обработаны',
+        });
+      } else if (result.status === 'no_pending') {
+        toast({
+          title: 'Нет незавершённых задач',
+          description: 'Все парсинги завершены или не запущены',
+        });
+      } else {
+        toast({
+          title: 'Продолжение парсинга',
+          description: `Обрабатывается: ${result.section || ''}, ${result.year || ''} год`,
+        });
+      }
     } catch (error) {
       toast({
         title: 'Ошибка',

@@ -35,10 +35,14 @@ def handler(event: dict, context) -> dict:
         conn.autocommit = False
         
         if method == 'POST':
-            body_raw = event.get('body', '{}')
-            if not body_raw or body_raw.strip() == '':
-                body_raw = '{}'
-            body = json.loads(body_raw)
+            body_raw = event.get('body') or '{}'
+            if isinstance(body_raw, dict):
+                body = body_raw
+            else:
+                body_str = str(body_raw).strip()
+                if not body_str or body_str == 'None':
+                    body_str = '{}'
+                body = json.loads(body_str)
             action = body.get('action', 'parse')
             
             if action == 'parse':
@@ -89,10 +93,17 @@ def parse_docs(conn, schema: str, sections: list, years: list) -> dict:
     """Парсинг по годам с продолжением после таймаутов"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
+    # Сортируем разделы по приоритету: programmy → rasporyazheniya → postanovleniya
+    section_order = {'programmy': 1, 'rasporyazheniya': 2, 'postanovleniya': 3}
+    sorted_sections = sorted(sections, key=lambda s: section_order.get(s, 99))
+    
+    # Сортируем годы от свежих к старым (2026, 2025, 2024...)
+    sorted_years = sorted(years, reverse=True)
+    
     main_log_id = None
     try:
         main_log_id = log_create(cursor, schema, 'system', 'info', 
-            f'🚀 ПАРСИНГ ЗАПУЩЕН | Разделов: {len(sections)} | Годов: {len(years)}')
+            f'🚀 ПАРСИНГ ЗАПУЩЕН | Разделов: {len(sorted_sections)} | Годов: {len(sorted_years)} | Порядок: {", ".join(sorted_sections)} → от {sorted_years[0]} до {sorted_years[-1]}')
         conn.commit()
     except Exception as e:
         cursor.close()
@@ -102,8 +113,8 @@ def parse_docs(conn, schema: str, sections: list, years: list) -> dict:
     t_start = time.time()
     
     try:
-        for section in sections:
-            for year in years:
+        for section in sorted_sections:
+            for year in sorted_years:
                 try:
                     elapsed = time.time() - t_start
                     if elapsed > 25:
@@ -308,6 +319,17 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         msg = f"✅ ГОД ЗАВЕРШЕН: {year}\nНовых: {stats['new']}, Изменено: {stats['upd']}, Без изменений: {stats['skip']}, Ошибок: {stats['errors']}\nВремя: {dur}мс"
         log_create(cursor, schema, section, 'success', msg)
         conn.commit()
+        
+        # Проверяем, не завершились ли ВСЕ парсинги
+        cursor.execute(f"SELECT COUNT(*) as pending FROM {schema}.parsing_state WHERE status != 'completed'")
+        pending = cursor.fetchone()['pending']
+        
+        if pending == 0:
+            cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.parsing_state")
+            total = cursor.fetchone()['total']
+            log_create(cursor, schema, 'system', 'success', 
+                f'🎉 ПАРСИНГ ПОЛНОСТЬЮ ЗАВЕРШЁН! Обработано разделов/годов: {total}')
+            conn.commit()
         
         cursor.close()
         return {
@@ -514,15 +536,44 @@ def get_ctype(ext: str) -> str:
 
 
 def continue_parsing(conn, schema: str) -> dict:
-    """Автоматическое продолжение незавершённых парсингов"""
+    """Автоматическое продолжение незавершённых парсингов с приоритетом"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    cursor.execute(
-        f"SELECT section, year, page FROM {schema}.parsing_state WHERE status IN ('running', 'retry', 'pending') ORDER BY updated_at DESC LIMIT 1"
-    )
+    # Приоритет разделов: programmy → rasporyazheniya → postanovleniya
+    section_priority = {'programmy': 1, 'rasporyazheniya': 2, 'postanovleniya': 3}
+    
+    # Ищем незавершённые задачи с приоритетом: сначала по разделам, потом по году (от свежих)
+    cursor.execute(f"""
+        SELECT section, year, page, status 
+        FROM {schema}.parsing_state 
+        WHERE status IN ('running', 'retry', 'pending')
+        ORDER BY 
+            CASE section 
+                WHEN 'programmy' THEN 1 
+                WHEN 'rasporyazheniya' THEN 2 
+                WHEN 'postanovleniya' THEN 3 
+                ELSE 4 
+            END,
+            year DESC
+        LIMIT 1
+    """)
     state = cursor.fetchone()
     
     if not state:
+        # Проверяем, все ли задачи завершены
+        cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.parsing_state WHERE status = 'completed'")
+        completed_count = cursor.fetchone()['total']
+        
+        cursor.execute(f"SELECT COUNT(*) as total FROM {schema}.parsing_state")
+        total_count = cursor.fetchone()['total']
+        
+        if completed_count > 0 and completed_count == total_count:
+            log_create(cursor, schema, 'system', 'success', 
+                f'🎉 ПАРСИНГ ПОЛНОСТЬЮ ЗАВЕРШЕН! Обработано разделов/годов: {total_count}')
+            conn.commit()
+            cursor.close()
+            return {'status': 'all_completed', 'message': '🎉 Парсинг полностью завершён!', 'total_tasks': total_count}
+        
         cursor.close()
         return {'status': 'no_pending', 'message': 'Нет незавершённых парсингов'}
     
@@ -531,7 +582,7 @@ def continue_parsing(conn, schema: str) -> dict:
     page = state['page']
     
     log_create(cursor, schema, 'system', 'info', 
-        f'🔄 Автопродолжение парсинга: {section}, {year} год, страница {page}')
+        f'🔄 Автопродолжение (приоритет: {section_priority.get(section, 99)}): {section}, {year} год, страница {page}')
     conn.commit()
     
     result = parse_single_year(conn, schema, section, year)
@@ -541,6 +592,7 @@ def continue_parsing(conn, schema: str) -> dict:
         'status': 'continued',
         'section': section,
         'year': year,
+        'page': page,
         'result': result
     }
 
