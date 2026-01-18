@@ -35,8 +35,10 @@ def handler(event: dict, context) -> dict:
         conn.autocommit = False
         
         if method == 'POST':
-            body_raw = event.get('body') or '{}'
-            body = json.loads(body_raw) if body_raw else {}
+            body_raw = event.get('body', '{}')
+            if not body_raw or body_raw.strip() == '':
+                body_raw = '{}'
+            body = json.loads(body_raw)
             action = body.get('action', 'parse')
             
             if action == 'parse':
@@ -57,6 +59,12 @@ def handler(event: dict, context) -> dict:
             
             elif action == 'monitor':
                 result = monitor(conn, schema)
+                conn.commit()
+                conn.close()
+                return success_response(result)
+            
+            elif action == 'continue_parsing':
+                result = continue_parsing(conn, schema)
                 conn.commit()
                 conn.close()
                 return success_response(result)
@@ -503,6 +511,38 @@ def get_ctype(ext: str) -> str:
         'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     }
     return types.get(ext, 'application/octet-stream')
+
+
+def continue_parsing(conn, schema: str) -> dict:
+    """Автоматическое продолжение незавершённых парсингов"""
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cursor.execute(
+        f"SELECT section, year, page FROM {schema}.parsing_state WHERE status IN ('running', 'retry', 'pending') ORDER BY updated_at DESC LIMIT 1"
+    )
+    state = cursor.fetchone()
+    
+    if not state:
+        cursor.close()
+        return {'status': 'no_pending', 'message': 'Нет незавершённых парсингов'}
+    
+    section = state['section']
+    year = state['year']
+    page = state['page']
+    
+    log_create(cursor, schema, 'system', 'info', 
+        f'🔄 Автопродолжение парсинга: {section}, {year} год, страница {page}')
+    conn.commit()
+    
+    result = parse_single_year(conn, schema, section, year)
+    
+    cursor.close()
+    return {
+        'status': 'continued',
+        'section': section,
+        'year': year,
+        'result': result
+    }
 
 
 def monitor(conn, schema: str) -> dict:

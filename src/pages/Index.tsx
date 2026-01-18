@@ -31,6 +31,7 @@ const Index = () => {
   const [telegramChatId, setTelegramChatId] = useState('');
   const [activeTab, setActiveTab] = useState('documents');
   const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
+  const [autoContinue, setAutoContinue] = useState(false);
   const { toast } = useToast();
 
   const currentYear = new Date().getFullYear();
@@ -66,6 +67,20 @@ const Index = () => {
       return () => clearInterval(interval);
     }
   }, [autoRefreshLogs]);
+
+  useEffect(() => {
+    if (autoContinue) {
+      const interval = setInterval(async () => {
+        try {
+          await apiClient.continueParsing();
+        } catch (error) {
+          console.error('Failed to continue parsing:', error);
+        }
+      }, 35000);
+
+      return () => clearInterval(interval);
+    }
+  }, [autoContinue]);
 
   const loadAllData = async () => {
     try {
@@ -157,6 +172,26 @@ const Index = () => {
       setAutoRefreshLogs(false);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleContinueParsing = async () => {
+    setActiveTab('logs');
+    setAutoRefreshLogs(true);
+    
+    try {
+      await apiClient.continueParsing();
+      
+      toast({
+        title: 'Продолжение парсинга',
+        description: 'Система продолжит незавершённую задачу. Включите автопродолжение для полного сбора.'
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось продолжить парсинг',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -326,6 +361,9 @@ const Index = () => {
               setTelegramChatId={setTelegramChatId}
               handleSaveSettings={handleSaveSettings}
               handleRunParser={handleRunParser}
+              handleContinueParsing={handleContinueParsing}
+              autoContinue={autoContinue}
+              setAutoContinue={setAutoContinue}
               loading={loading}
             />
           </TabsContent>

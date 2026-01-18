@@ -98,5 +98,17 @@ export const apiClient = {
     
     if (!response.ok) throw new Error('Failed to run monitor');
     return response.json();
+  },
+
+  async continueParsing() {
+    fetch(PARSER_BASE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'continue_parsing'
+      })
+    }).catch(() => {});
+    
+    return { status: 'continued' };
   }
 };
