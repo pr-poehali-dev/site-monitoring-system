@@ -12,6 +12,7 @@ interface SettingsTabProps {
   handleSaveSettings: () => void;
   handleRunParser: () => void;
   handleContinueParsing: () => void;
+  handleForceReparse: () => void;
   loading: boolean;
 }
 
@@ -21,6 +22,7 @@ const SettingsTab = ({
   handleSaveSettings,
   handleRunParser,
   handleContinueParsing,
+  handleForceReparse,
   loading
 }: SettingsTabProps) => {
   return (
@@ -72,19 +74,35 @@ const SettingsTab = ({
           </div>
         </div>
 
-        <div className="flex gap-3 pt-4 border-t">
-          <Button className="flex-1" onClick={handleSaveSettings}>
+        <div className="space-y-3 pt-4 border-t">
+          <Button className="w-full" onClick={handleSaveSettings}>
             <Icon name="Save" size={16} className="mr-2" />
             Сохранить настройки
           </Button>
-          <Button variant="outline" onClick={handleRunParser} disabled={loading}>
-            <Icon name="Play" size={16} className="mr-2" />
-            {loading ? 'Запуск...' : 'Запустить парсинг'}
+          
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant="outline" onClick={handleRunParser} disabled={loading}>
+              <Icon name="Play" size={16} className="mr-2" />
+              {loading ? 'Запуск...' : 'Запустить парсинг'}
+            </Button>
+            <Button variant="outline" onClick={handleContinueParsing} disabled={loading}>
+              <Icon name="RefreshCw" size={16} className="mr-2" />
+              Продолжить
+            </Button>
+          </div>
+
+          <Button 
+            variant="destructive" 
+            className="w-full"
+            onClick={handleForceReparse} 
+            disabled={loading}
+          >
+            <Icon name="RotateCcw" size={16} className="mr-2" />
+            Перезапустить всё с нуля
           </Button>
-          <Button variant="outline" onClick={handleContinueParsing} disabled={loading}>
-            <Icon name="RefreshCw" size={16} className="mr-2" />
-            Продолжить
-          </Button>
+          <p className="text-xs text-gray-500 text-center">
+            ⚠️ Все документы будут спарсены заново (может занять ~1 час)
+          </p>
         </div>
       </CardContent>
     </Card>

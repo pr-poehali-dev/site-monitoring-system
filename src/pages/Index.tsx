@@ -196,6 +196,43 @@ const Index = () => {
     }
   };
 
+  const handleForceReparse = async () => {
+    const confirmed = window.confirm(
+      '⚠️ Внимание! Это полностью перезапустит парсинг всех документов с нуля.\n\n' +
+      'Все годы (2009-2026) будут спарсены заново.\n' +
+      'Процесс может занять ~1 час.\n\n' +
+      'Продолжить?'
+    );
+
+    if (!confirmed) return;
+
+    setLoading(true);
+    setActiveTab('logs');
+    setAutoRefreshLogs(true);
+    
+    try {
+      await apiClient.runParser(['programmy', 'rasporyazheniya', 'postanovleniya'], years.map(y => parseInt(y)), true);
+      
+      setTimeout(() => {
+        apiClient.continueParsing(true);
+      }, 2000);
+      
+      toast({
+        title: '🔄 Полный перепарсинг запущен',
+        description: `Все документы будут обработаны заново. Система работает автономно — можно закрыть страницу.`
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось запустить перепарсинг',
+        variant: 'destructive'
+      });
+      setAutoRefreshLogs(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatFileSize = (bytes: number) => {
     if (!bytes) return '-';
     const kb = bytes / 1024;
@@ -363,6 +400,7 @@ const Index = () => {
               handleSaveSettings={handleSaveSettings}
               handleRunParser={handleRunParser}
               handleContinueParsing={handleContinueParsing}
+              handleForceReparse={handleForceReparse}
               loading={loading}
             />
           </TabsContent>
