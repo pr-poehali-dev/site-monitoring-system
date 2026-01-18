@@ -1,0 +1,42 @@
+{
+  "tests": [
+    {
+      "name": "Test parser health check",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 400,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Test parse action",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "parse",
+        "sections": ["postanovleniya"],
+        "years": [2024]
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "total_processed": 0,
+        "new_documents": 0,
+        "updated_documents": 0
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Test monitor action",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "monitor"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "changes_found": 0,
+        "notifications_sent": 0
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

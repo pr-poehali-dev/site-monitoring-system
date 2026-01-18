@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -9,34 +9,65 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
-
-const mockDocuments = [
-  { id: 1, title: 'Постановление №245 от 15.03.2024', url: '/docs/smolensk/postanovleniya/2024/245', section: 'Постановления', date: '2024-03-15', status: 'active' },
-  { id: 2, title: 'Распоряжение №89 от 10.02.2024', url: '/docs/smolensk/rasporyazheniya/2024/89', section: 'Распоряжения', date: '2024-02-10', status: 'active' },
-  { id: 3, title: 'Муниципальная программа "Развитие образования на 2024-2026 годы"', url: '/docs/municipalnye-programmy/2024/obrazovanie', section: 'Муниципальные программы', date: '2024-01-20', status: 'active' },
-  { id: 4, title: 'Постановление №198 от 28.12.2023', url: '/docs/smolensk/postanovleniya/2023/198', section: 'Постановления', date: '2023-12-28', status: 'active' },
-  { id: 5, title: 'Распоряжение №154 от 05.11.2023', url: '/docs/smolensk/rasporyazheniya/2023/154', section: 'Распоряжения', date: '2023-11-05', status: 'active' },
-];
-
-const mockChanges = [
-  { id: 1, docId: 1, docTitle: 'Постановление №245 от 15.03.2024', type: 'new', date: '2024-03-15 14:23', section: 'Постановления' },
-  { id: 2, docId: 3, docTitle: 'Муниципальная программа "Развитие образования на 2024-2026 годы"', type: 'modified', date: '2024-03-14 09:15', section: 'Муниципальные программы' },
-  { id: 3, docId: 2, docTitle: 'Распоряжение №89 от 10.02.2024', type: 'new', date: '2024-02-10 11:45', section: 'Распоряжения' },
-];
-
-const mockLogs = [
-  { id: 1, timestamp: '2024-03-15 14:30:12', status: 'success', message: 'Парсинг раздела "Постановления 2024" завершён. Найдено 3 новых документа', duration: '12.5s' },
-  { id: 2, timestamp: '2024-03-15 14:29:45', status: 'success', message: 'Парсинг раздела "Распоряжения 2024" завершён. Изменений не обнаружено', duration: '8.3s' },
-  { id: 3, timestamp: '2024-03-15 14:29:30', status: 'info', message: 'Запуск ежедневного мониторинга', duration: '-' },
-  { id: 4, timestamp: '2024-03-14 14:30:05', status: 'success', message: 'Парсинг раздела "Муниципальные программы" завершён. Обнаружено 1 изменение', duration: '15.2s' },
-  { id: 5, timestamp: '2024-03-14 14:29:30', status: 'info', message: 'Запуск ежедневного мониторинга', duration: '-' },
-];
+import { apiClient } from '@/config/api';
+import { useToast } from '@/hooks/use-toast';
 
 const Index = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSection, setSelectedSection] = useState('all');
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [changes, setChanges] = useState<any[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [stats, setStats] = useState({ total_documents: 0, changes_this_week: 0, active_sections: 0 });
+  const [settings, setSettings] = useState<any>({});
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
-  const filteredDocuments = mockDocuments.filter(doc => {
+  useEffect(() => {
+    loadAllData();
+  }, []);
+
+  const loadAllData = async () => {
+    try {
+      const [statsData, docsData, changesData, logsData, settingsData] = await Promise.all([
+        apiClient.getStats(),
+        apiClient.getDocuments({ limit: 100 }),
+        apiClient.getChanges(50),
+        apiClient.getLogs(50),
+        apiClient.getSettings()
+      ]);
+      
+      setStats(statsData);
+      setDocuments(docsData.documents || []);
+      setChanges(changesData.changes || []);
+      setLogs(logsData.logs || []);
+      setSettings(settingsData.settings || {});
+    } catch (error) {
+      console.error('Failed to load data:', error);
+    }
+  };
+
+  const handleRunParser = async () => {
+    setLoading(true);
+    try {
+      await apiClient.runParser(['postanovleniya', 'rasporyazheniya', 'programmy'], [2024, 2025]);
+      toast({
+        title: 'Парсинг запущен',
+        description: 'Система начала сканирование документов'
+      });
+      setTimeout(() => loadAllData(), 5000);
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось запустить парсинг',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredDocuments = documents.filter(doc => {
     const matchesSearch = doc.title.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesSection = selectedSection === 'all' || doc.section === selectedSection;
     return matchesSearch && matchesSection;
@@ -65,7 +96,7 @@ const Index = () => {
             </CardHeader>
             <CardContent>
               <div className="flex items-end justify-between">
-                <div className="text-3xl font-bold text-gray-900">1,247</div>
+                <div className="text-3xl font-bold text-gray-900">{stats.total_documents.toLocaleString()}</div>
                 <Icon name="FileText" size={20} className="text-gray-400" />
               </div>
             </CardContent>
@@ -77,7 +108,7 @@ const Index = () => {
             </CardHeader>
             <CardContent>
               <div className="flex items-end justify-between">
-                <div className="text-3xl font-bold text-gray-900">23</div>
+                <div className="text-3xl font-bold text-gray-900">{stats.changes_this_week}</div>
                 <Icon name="TrendingUp" size={20} className="text-green-500" />
               </div>
             </CardContent>
@@ -89,7 +120,7 @@ const Index = () => {
             </CardHeader>
             <CardContent>
               <div className="flex items-end justify-between">
-                <div className="text-3xl font-bold text-gray-900">8</div>
+                <div className="text-3xl font-bold text-gray-900">{stats.active_sections}</div>
                 <Icon name="Folders" size={20} className="text-gray-400" />
               </div>
             </CardContent>
@@ -168,11 +199,13 @@ const Index = () => {
                             <Badge variant="secondary">{doc.section}</Badge>
                           </TableCell>
                           <TableCell className="text-gray-600">
-                            {new Date(doc.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                            {doc.published_date ? new Date(doc.published_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-'}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button variant="ghost" size="sm">
-                              <Icon name="ExternalLink" size={16} />
+                            <Button variant="ghost" size="sm" asChild>
+                              <a href={doc.url} target="_blank" rel="noopener noreferrer">
+                                <Icon name="ExternalLink" size={16} />
+                              </a>
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -182,7 +215,7 @@ const Index = () => {
                 </div>
 
                 <div className="flex justify-between items-center text-sm text-gray-600">
-                  <div>Показано {filteredDocuments.length} из {mockDocuments.length}</div>
+                  <div>Показано {filteredDocuments.length} из {documents.length}</div>
                 </div>
               </CardContent>
             </Card>
@@ -196,35 +229,43 @@ const Index = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {mockChanges.map((change) => (
-                    <div key={change.id} className="flex gap-4 p-4 border rounded-lg hover:bg-gray-50 transition-colors">
-                      <div className="flex-shrink-0 mt-1">
-                        {change.type === 'new' ? (
-                          <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-                            <Icon name="Plus" size={20} className="text-green-600" />
-                          </div>
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
-                            <Icon name="Pencil" size={20} className="text-orange-600" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 space-y-2">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <div className="font-medium text-gray-900">{change.docTitle}</div>
-                            <div className="text-sm text-gray-600 mt-1">
-                              <Badge variant="secondary" className="mr-2">{change.section}</Badge>
-                              <span className="text-xs text-gray-500">{change.date}</span>
+                  {changes.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      Нет обнаруженных изменений
+                    </div>
+                  ) : (
+                    changes.map((change) => (
+                      <div key={change.id} className="flex gap-4 p-4 border rounded-lg hover:bg-gray-50 transition-colors">
+                        <div className="flex-shrink-0 mt-1">
+                          {change.change_type === 'new' ? (
+                            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                              <Icon name="Plus" size={20} className="text-green-600" />
                             </div>
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
+                              <Icon name="Pencil" size={20} className="text-orange-600" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="font-medium text-gray-900">{change.title}</div>
+                              <div className="text-sm text-gray-600 mt-1">
+                                <Badge variant="secondary" className="mr-2">{change.section}</Badge>
+                                <span className="text-xs text-gray-500">
+                                  {new Date(change.detected_at).toLocaleString('ru-RU')}
+                                </span>
+                              </div>
+                            </div>
+                            <Badge variant={change.change_type === 'new' ? 'default' : 'secondary'}>
+                              {change.change_type === 'new' ? 'Новый' : 'Изменён'}
+                            </Badge>
                           </div>
-                          <Badge variant={change.type === 'new' ? 'default' : 'secondary'}>
-                            {change.type === 'new' ? 'Новый' : 'Изменён'}
-                          </Badge>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -238,29 +279,35 @@ const Index = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {mockLogs.map((log) => (
-                    <div key={log.id} className="flex gap-3 p-3 border rounded-lg font-mono text-sm">
-                      <div className="flex-shrink-0">
-                        {log.status === 'success' && (
-                          <Icon name="CheckCircle2" size={18} className="text-green-600" />
-                        )}
-                        {log.status === 'info' && (
-                          <Icon name="Info" size={18} className="text-blue-600" />
-                        )}
-                        {log.status === 'error' && (
-                          <Icon name="XCircle" size={18} className="text-red-600" />
-                        )}
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <div className="flex items-center gap-3 text-gray-500 text-xs">
-                          <span>{log.timestamp}</span>
-                          <span>•</span>
-                          <span>{log.duration}</span>
-                        </div>
-                        <div className="text-gray-900">{log.message}</div>
-                      </div>
+                  {logs.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      Нет записей в логах
                     </div>
-                  ))}
+                  ) : (
+                    logs.map((log) => (
+                      <div key={log.id} className="flex gap-3 p-3 border rounded-lg font-mono text-sm">
+                        <div className="flex-shrink-0">
+                          {log.status === 'success' && (
+                            <Icon name="CheckCircle2" size={18} className="text-green-600" />
+                          )}
+                          {log.status === 'info' && (
+                            <Icon name="Info" size={18} className="text-blue-600" />
+                          )}
+                          {log.status === 'error' && (
+                            <Icon name="XCircle" size={18} className="text-red-600" />
+                          )}
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center gap-3 text-gray-500 text-xs">
+                            <span>{new Date(log.started_at).toLocaleString('ru-RU')}</span>
+                            <span>•</span>
+                            <span>{log.duration_ms ? `${log.duration_ms}ms` : '-'}</span>
+                          </div>
+                          <div className="text-gray-900">{log.message}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -349,9 +396,9 @@ const Index = () => {
                     <Icon name="Save" size={16} className="mr-2" />
                     Сохранить настройки
                   </Button>
-                  <Button variant="outline">
+                  <Button variant="outline" onClick={handleRunParser} disabled={loading}>
                     <Icon name="Play" size={16} className="mr-2" />
-                    Запустить проверку
+                    {loading ? 'Запуск...' : 'Запустить проверку'}
                   </Button>
                 </div>
               </CardContent>

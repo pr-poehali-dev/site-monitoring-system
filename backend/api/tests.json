@@ -1,0 +1,57 @@
+{
+  "tests": [
+    {
+      "name": "Test get documents",
+      "method": "GET",
+      "path": "/?endpoint=documents",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "documents": [],
+        "total": 0
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Test get changes",
+      "method": "GET",
+      "path": "/?endpoint=changes",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "changes": []
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Test get logs",
+      "method": "GET",
+      "path": "/?endpoint=logs",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "logs": "array"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Test get settings",
+      "method": "GET",
+      "path": "/?endpoint=settings",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "settings": {}
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Test get stats",
+      "method": "GET",
+      "path": "/?endpoint=stats",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "total_documents": 0,
+        "changes_this_week": 0,
+        "active_sections": 0
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
