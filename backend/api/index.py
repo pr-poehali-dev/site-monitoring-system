@@ -93,6 +93,12 @@ def handler(event: dict, context) -> dict:
                 cursor.close()
                 conn.close()
                 return success_response(result)
+            elif endpoint == 'full_reset':
+                result = full_database_reset(cursor, schema)
+                conn.commit()
+                cursor.close()
+                conn.close()
+                return success_response(result)
         
         cursor.close()
         conn.close()
@@ -587,6 +593,49 @@ def remove_duplicate_documents(cursor, schema: str) -> dict:
         'deleted_files': deleted_files,
         'duplicate_groups': duplicate_groups,
         'message': f'Удалено {deleted_documents} дубликатов из {duplicate_groups} групп'
+    }
+
+
+def full_database_reset(cursor, schema: str) -> dict:
+    """Полная очистка базы данных - удаление всех документов, изменений, файлов и логов"""
+    
+    # Подсчитываем что будет удалено
+    cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.documents")
+    docs_count = cursor.fetchone()['cnt']
+    
+    cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.document_changes")
+    changes_count = cursor.fetchone()['cnt']
+    
+    cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.document_files")
+    files_count = cursor.fetchone()['cnt']
+    
+    cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.parsing_logs")
+    logs_count = cursor.fetchone()['cnt']
+    
+    cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.parsing_state")
+    state_count = cursor.fetchone()['cnt']
+    
+    # Удаляем все данные (кроме настроек)
+    cursor.execute(f"DELETE FROM {schema}.document_changes")
+    cursor.execute(f"DELETE FROM {schema}.document_files")
+    cursor.execute(f"DELETE FROM {schema}.documents")
+    cursor.execute(f"DELETE FROM {schema}.parsing_logs")
+    cursor.execute(f"DELETE FROM {schema}.parsing_state")
+    
+    # Сбрасываем sequences для автоинкрементов
+    cursor.execute(f"ALTER SEQUENCE {schema}.documents_id_seq RESTART WITH 1")
+    cursor.execute(f"ALTER SEQUENCE {schema}.document_changes_id_seq RESTART WITH 1")
+    cursor.execute(f"ALTER SEQUENCE {schema}.document_files_id_seq RESTART WITH 1")
+    cursor.execute(f"ALTER SEQUENCE {schema}.parsing_logs_id_seq RESTART WITH 1")
+    cursor.execute(f"ALTER SEQUENCE {schema}.parsing_state_id_seq RESTART WITH 1")
+    
+    return {
+        'deleted_documents': docs_count,
+        'deleted_changes': changes_count,
+        'deleted_files': files_count,
+        'deleted_logs': logs_count,
+        'deleted_state': state_count,
+        'message': f'База данных полностью очищена. Удалено: {docs_count} документов, {changes_count} изменений, {files_count} файлов, {logs_count} логов'
     }
 
 
