@@ -74,7 +74,9 @@ const MissingFilesPanel = () => {
     return () => clearInterval(interval);
   }, []);
 
-  if (!stats || stats.pending === 0) return null;
+  if (!stats) return null;
+  
+  if (stats.pending === 0 && stats.failed === 0) return null;
 
   const progress = (stats.downloaded / stats.total_files) * 100;
   const needsAction = stats.pending > 0 || stats.failed > 0;

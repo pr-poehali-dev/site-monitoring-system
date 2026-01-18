@@ -78,6 +78,75 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
   const fullData = analytics?.by_publication_date || [];
   const displayData = chartData.length > 0 ? chartData : fullData;
 
+  // Wheel zoom
+  const handleWheel = (e: any) => {
+    if (!e || !e.activeLabel) return;
+    
+    const delta = e.deltaY || 0;
+    if (delta === 0) return;
+
+    const direction = delta > 0 ? 1 : -1; // 1 = zoom out, -1 = zoom in
+    const currentData = displayData.length > 0 ? displayData : fullData;
+    const mouseIndex = fullData.findIndex(item => item.date === e.activeLabel);
+    
+    if (mouseIndex === -1) return;
+
+    const currentLeft = left || 0;
+    const currentRight = right || fullData.length - 1;
+    const currentRange = currentRight - currentLeft;
+
+    // Zoom in (scroll up)
+    if (direction < 0) {
+      const minRange = 30;
+      if (currentRange <= minRange) return;
+
+      const zoomFactor = 0.8;
+      const newRange = Math.max(minRange, Math.floor(currentRange * zoomFactor));
+      const rangeDiff = currentRange - newRange;
+
+      // Центрируем zoom на позиции мыши
+      const mouseRelativePos = (mouseIndex - currentLeft) / currentRange;
+      const newLeft = Math.max(0, currentLeft + Math.floor(rangeDiff * mouseRelativePos));
+      const newRight = Math.min(fullData.length - 1, newLeft + newRange);
+
+      const newData = fullData.slice(newLeft, newRight + 1);
+      const counts = newData.map(item => item.count);
+      
+      setChartData(newData);
+      setLeft(newLeft);
+      setRight(newRight);
+      setTop(Math.max(...counts));
+      setBottom(Math.min(...counts));
+    } 
+    // Zoom out (scroll down)
+    else {
+      if (currentLeft === 0 && currentRight === fullData.length - 1) return;
+
+      const zoomFactor = 1.25;
+      const newRange = Math.min(fullData.length - 1, Math.floor(currentRange * zoomFactor));
+      const rangeDiff = newRange - currentRange;
+
+      const mouseRelativePos = (mouseIndex - currentLeft) / currentRange;
+      const newLeft = Math.max(0, currentLeft - Math.floor(rangeDiff * mouseRelativePos));
+      const newRight = Math.min(fullData.length - 1, newLeft + newRange);
+
+      // Если достигли полного размера - сбрасываем zoom
+      if (newLeft === 0 && newRight === fullData.length - 1) {
+        zoomOut();
+        return;
+      }
+
+      const newData = fullData.slice(newLeft, newRight + 1);
+      const counts = newData.map(item => item.count);
+      
+      setChartData(newData);
+      setLeft(newLeft);
+      setRight(newRight);
+      setTop(Math.max(...counts));
+      setBottom(Math.min(...counts));
+    }
+  };
+
   // Zoom функции
   const zoom = () => {
     if (refAreaLeft === refAreaRight || refAreaRight === '') {
@@ -397,18 +466,15 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
               onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
               onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
               onMouseUp={zoom}
+              onWheel={handleWheel}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis 
                 dataKey="date"
-                allowDataOverflow
-                domain={[left, right]}
                 tick={displayData.length > 365 ? false : { fontSize: 10, angle: -45, textAnchor: 'end' }}
                 height={displayData.length > 365 ? 30 : 80}
               />
               <YAxis 
-                allowDataOverflow
-                domain={[bottom, top]}
                 tick={{ fontSize: 12 }}
               />
               <Tooltip 
@@ -458,8 +524,9 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
                 <div className="text-sm text-green-900">
                   <p className="font-medium mb-1">Интерактивное масштабирование</p>
                   <p className="text-xs text-green-700">
-                    🖱️ <strong>Выделите область мышью</strong> для увеличения (зажмите и протяните).
-                    Минимальный диапазон: 30 дней. Нажмите "Сбросить zoom" для возврата к полному обзору.
+                    🖱️ <strong>Выделите область мышью</strong> для увеличения (зажмите и протяните).<br/>
+                    🔍 <strong>Колёсико мыши</strong> — плавное масштабирование (вверх = zoom in, вниз = zoom out).<br/>
+                    Минимальный диапазон: 30 дней.
                   </p>
                 </div>
               </div>
