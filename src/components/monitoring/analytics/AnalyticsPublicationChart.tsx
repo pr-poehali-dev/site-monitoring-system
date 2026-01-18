@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
@@ -18,72 +18,113 @@ const AnalyticsPublicationChart = ({ analytics }: AnalyticsPublicationChartProps
   const [right, setRight] = useState<number>(0);
   const [top, setTop] = useState<number>(0);
   const [bottom, setBottom] = useState<number>(0);
+  const [hoveredLabel, setHoveredLabel] = useState<string>('');
+  
+  const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const fullData = analytics?.by_publication_date || [];
   const displayData = chartData.length > 0 ? chartData : fullData;
 
-  const handleWheel = (e: any) => {
-    if (!e || !e.activeLabel) return;
-    
-    const delta = e.deltaY || 0;
-    if (delta === 0) return;
+  const zoomOut = () => {
+    setChartData([]);
+    setLeft(0);
+    setRight(0);
+    setTop(0);
+    setBottom(0);
+    setRefAreaLeft('');
+    setRefAreaRight('');
+  };
 
-    const direction = delta > 0 ? 1 : -1;
-    const currentData = displayData.length > 0 ? displayData : fullData;
-    const mouseIndex = fullData.findIndex(item => item.date === e.activeLabel);
-    
-    if (mouseIndex === -1) return;
+  useEffect(() => {
+    const container = chartContainerRef.current;
+    if (!container) return;
 
-    const currentLeft = left || 0;
-    const currentRight = right || fullData.length - 1;
-    const currentRange = currentRight - currentLeft;
-
-    if (direction < 0) {
-      const minRange = 30;
-      if (currentRange <= minRange) return;
-
-      const zoomFactor = 0.8;
-      const newRange = Math.max(minRange, Math.floor(currentRange * zoomFactor));
-      const rangeDiff = currentRange - newRange;
-
-      const mouseRelativePos = (mouseIndex - currentLeft) / currentRange;
-      const newLeft = Math.max(0, currentLeft + Math.floor(rangeDiff * mouseRelativePos));
-      const newRight = Math.min(fullData.length - 1, newLeft + newRange);
-
-      const newData = fullData.slice(newLeft, newRight + 1);
-      const counts = newData.map(item => item.count);
+    const handleWheelEvent = (e: WheelEvent) => {
+      if (!hoveredLabel) return;
       
-      setChartData(newData);
-      setLeft(newLeft);
-      setRight(newRight);
-      setTop(Math.max(...counts));
-      setBottom(Math.min(...counts));
-    } 
-    else {
-      if (currentLeft === 0 && currentRight === fullData.length - 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const delta = e.deltaY;
+      if (delta === 0) return;
 
-      const zoomFactor = 1.25;
-      const newRange = Math.min(fullData.length - 1, Math.floor(currentRange * zoomFactor));
-      const rangeDiff = newRange - currentRange;
+      const direction = delta > 0 ? 1 : -1;
+      const mouseIndex = fullData.findIndex(item => item.date === hoveredLabel);
+      
+      if (mouseIndex === -1) return;
 
-      const mouseRelativePos = (mouseIndex - currentLeft) / currentRange;
-      const newLeft = Math.max(0, currentLeft - Math.floor(rangeDiff * mouseRelativePos));
-      const newRight = Math.min(fullData.length - 1, newLeft + newRange);
+      const currentLeft = left || 0;
+      const currentRight = right || fullData.length - 1;
+      const currentRange = currentRight - currentLeft;
 
-      if (newLeft === 0 && newRight === fullData.length - 1) {
-        zoomOut();
-        return;
+      if (direction < 0) {
+        const minRange = 30;
+        if (currentRange <= minRange) return;
+
+        const zoomFactor = 0.8;
+        const newRange = Math.max(minRange, Math.floor(currentRange * zoomFactor));
+        const rangeDiff = currentRange - newRange;
+
+        const mouseRelativePos = (mouseIndex - currentLeft) / currentRange;
+        const newLeft = Math.max(0, currentLeft + Math.floor(rangeDiff * mouseRelativePos));
+        const newRight = Math.min(fullData.length - 1, newLeft + newRange);
+
+        const newData = fullData.slice(newLeft, newRight + 1);
+        const counts = newData.map(item => item.count);
+        
+        setChartData(newData);
+        setLeft(newLeft);
+        setRight(newRight);
+        setTop(Math.max(...counts));
+        setBottom(Math.min(...counts));
+      } else {
+        if (currentLeft === 0 && currentRight === fullData.length - 1) return;
+
+        const zoomFactor = 1.25;
+        const newRange = Math.min(fullData.length - 1, Math.floor(currentRange * zoomFactor));
+        const rangeDiff = newRange - currentRange;
+
+        const mouseRelativePos = (mouseIndex - currentLeft) / currentRange;
+        const newLeft = Math.max(0, currentLeft - Math.floor(rangeDiff * mouseRelativePos));
+        const newRight = Math.min(fullData.length - 1, newLeft + newRange);
+
+        if (newLeft === 0 && newRight === fullData.length - 1) {
+          setChartData([]);
+          setLeft(0);
+          setRight(0);
+          setTop(0);
+          setBottom(0);
+          setRefAreaLeft('');
+          setRefAreaRight('');
+          return;
+        }
+
+        const newData = fullData.slice(newLeft, newRight + 1);
+        const counts = newData.map(item => item.count);
+        
+        setChartData(newData);
+        setLeft(newLeft);
+        setRight(newRight);
+        setTop(Math.max(...counts));
+        setBottom(Math.min(...counts));
       }
+    };
 
-      const newData = fullData.slice(newLeft, newRight + 1);
-      const counts = newData.map(item => item.count);
-      
-      setChartData(newData);
-      setLeft(newLeft);
-      setRight(newRight);
-      setTop(Math.max(...counts));
-      setBottom(Math.min(...counts));
+    container.addEventListener('wheel', handleWheelEvent, { passive: false });
+    
+    return () => {
+      container.removeEventListener('wheel', handleWheelEvent);
+    };
+  }, [hoveredLabel, fullData, left, right]);
+
+  const handleMouseMove = (e: any) => {
+    if (e && e.activeLabel) {
+      setHoveredLabel(e.activeLabel);
     }
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredLabel('');
   };
 
   const zoom = () => {
@@ -122,16 +163,6 @@ const AnalyticsPublicationChart = ({ analytics }: AnalyticsPublicationChartProps
     setBottom(Math.min(...counts));
   };
 
-  const zoomOut = () => {
-    setChartData([]);
-    setLeft(0);
-    setRight(0);
-    setTop(0);
-    setBottom(0);
-    setRefAreaLeft('');
-    setRefAreaRight('');
-  };
-
   return (
     <Card>
       <CardHeader>
@@ -158,14 +189,18 @@ const AnalyticsPublicationChart = ({ analytics }: AnalyticsPublicationChartProps
         </div>
       </CardHeader>
       <CardContent>
-        <ResponsiveContainer width="100%" height={400}>
-          <LineChart 
-            data={displayData}
-            onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
-            onMouseMove={(e: any) => refAreaLeft && e && e.activeLabel && setRefAreaRight(e.activeLabel)}
-            onMouseUp={zoom}
-            onWheel={handleWheel}
-          >
+        <div ref={chartContainerRef}>
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart 
+              data={displayData}
+              onMouseDown={(e: any) => e && e.activeLabel && setRefAreaLeft(e.activeLabel)}
+              onMouseMove={(e: any) => {
+                handleMouseMove(e);
+                if (refAreaLeft && e && e.activeLabel) setRefAreaRight(e.activeLabel);
+              }}
+              onMouseUp={zoom}
+              onMouseLeave={handleMouseLeave}
+            >
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis 
               dataKey="date"
@@ -201,7 +236,8 @@ const AnalyticsPublicationChart = ({ analytics }: AnalyticsPublicationChartProps
               />
             )}
           </LineChart>
-        </ResponsiveContainer>
+          </ResponsiveContainer>
+        </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
