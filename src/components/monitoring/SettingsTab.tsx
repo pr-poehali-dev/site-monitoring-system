@@ -28,7 +28,7 @@ const SettingsTab = ({
   loading
 }: SettingsTabProps) => {
   return (
-    <div className="space-y-6">{/* Обёрточный div для нескольких карточек */}
+    <div className="space-y-6">
       <ParsingProgress autoRefresh={autoContinue} />
     <Card>
       <CardHeader>
@@ -97,7 +97,7 @@ const SettingsTab = ({
         </div>
       </CardContent>
     </Card>
-    </div>{/* Закрывающий div обёртки */}
+    </div>
   );
 };
 
