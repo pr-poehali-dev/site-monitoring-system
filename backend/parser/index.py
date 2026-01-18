@@ -546,16 +546,26 @@ def process_doc_table(cursor, schema, row, section, section_name, base_url, page
     main_file = all_files[0]
     
     cursor.execute(
-        f"SELECT id, content_hash, title, file_size, changes_count FROM {schema}.documents WHERE url = %s",
+        f"SELECT id, content_hash, title, file_size, changes_count, document_number, document_date, published_date FROM {schema}.documents WHERE url = %s",
         (doc_url,)
     )
     ex = cursor.fetchone()
     
     if ex:
-        if ex['content_hash'] != main_file['hash'] or ex['file_size'] != main_file['size']:
+        # Проверяем изменения в любых полях
+        has_changes = (
+            ex['content_hash'] != main_file['hash'] or 
+            ex['file_size'] != main_file['size'] or
+            ex['title'] != title or
+            ex['document_number'] != doc_num or
+            str(ex['document_date']) != str(doc_date) if doc_date else False or
+            str(ex['published_date']) != str(doc_date) if doc_date else False
+        )
+        
+        if has_changes:
             cursor.execute(
-                f"UPDATE {schema}.documents SET content_hash = %s, title = %s, file_size = %s, file_path = %s, file_cdn_url = %s, updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, changes_count = changes_count + 1 WHERE id = %s",
-                (main_file['hash'], title, main_file['size'], main_file['path'], main_file['cdn_url'], ex['id'])
+                f"UPDATE {schema}.documents SET content_hash = %s, title = %s, file_size = %s, file_path = %s, file_cdn_url = %s, document_number = %s, document_date = %s, published_date = %s, updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, changes_count = changes_count + 1 WHERE id = %s",
+                (main_file['hash'], title, main_file['size'], main_file['path'], main_file['cdn_url'], doc_num, doc_date, doc_date, ex['id'])
             )
             cursor.execute(
                 f"INSERT INTO {schema}.document_changes (document_id, change_type, old_content_hash, new_content_hash, old_title, new_title, old_file_size, new_file_size) VALUES (%s, 'modified', %s, %s, %s, %s, %s, %s)",
@@ -668,16 +678,26 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
     main_file = all_files[0]
     
     cursor.execute(
-        f"SELECT id, content_hash, title, file_size, changes_count FROM {schema}.documents WHERE url = %s",
+        f"SELECT id, content_hash, title, file_size, changes_count, document_number, document_date, published_date FROM {schema}.documents WHERE url = %s",
         (doc_url,)
     )
     ex = cursor.fetchone()
     
     if ex:
-        if ex['content_hash'] != main_file['hash'] or ex['file_size'] != main_file['size']:
+        # Проверяем изменения в любых полях
+        has_changes = (
+            ex['content_hash'] != main_file['hash'] or 
+            ex['file_size'] != main_file['size'] or
+            ex['title'] != full_title or
+            ex['document_number'] != doc_num or
+            str(ex['document_date']) != str(doc_date) if doc_date else False or
+            str(ex['published_date']) != str(pub_date) if pub_date else False
+        )
+        
+        if has_changes:
             cursor.execute(
-                f"UPDATE {schema}.documents SET content_hash = %s, title = %s, file_size = %s, file_path = %s, file_cdn_url = %s, updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, changes_count = changes_count + 1 WHERE id = %s",
-                (main_file['hash'], full_title, main_file['size'], main_file['path'], main_file['cdn_url'], ex['id'])
+                f"UPDATE {schema}.documents SET content_hash = %s, title = %s, file_size = %s, file_path = %s, file_cdn_url = %s, document_number = %s, document_date = %s, published_date = %s, updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, changes_count = changes_count + 1 WHERE id = %s",
+                (main_file['hash'], full_title, main_file['size'], main_file['path'], main_file['cdn_url'], doc_num, doc_date, pub_date, ex['id'])
             )
             cursor.execute(
                 f"INSERT INTO {schema}.document_changes (document_id, change_type, old_content_hash, new_content_hash, old_title, new_title, old_file_size, new_file_size) VALUES (%s, 'modified', %s, %s, %s, %s, %s, %s)",

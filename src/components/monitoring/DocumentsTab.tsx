@@ -26,6 +26,7 @@ interface DocumentsTabProps {
   page: number;
   setPage: (page: number) => void;
   pageSize: number;
+  onViewChanges: (documentId: number) => void;
 }
 
 const DocumentsTab = ({
@@ -47,7 +48,8 @@ const DocumentsTab = ({
   total,
   page,
   setPage,
-  pageSize
+  pageSize,
+  onViewChanges
 }: DocumentsTabProps) => {
   const totalPages = Math.ceil(total / pageSize);
   return (
@@ -153,7 +155,12 @@ const DocumentsTab = ({
                   </TableCell>
                   <TableCell className="text-center">
                     {doc.changes_count > 0 ? (
-                      <Badge variant="outline" className="text-xs">
+                      <Badge 
+                        variant="outline" 
+                        className="text-xs cursor-pointer hover:bg-primary hover:text-white transition-colors"
+                        onClick={() => onViewChanges(doc.id)}
+                        title="Показать изменения"
+                      >
                         {doc.changes_count}
                       </Badge>
                     ) : (

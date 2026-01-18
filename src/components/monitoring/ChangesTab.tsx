@@ -11,17 +11,37 @@ interface ChangesTabProps {
   page: number;
   setPage: (page: number) => void;
   pageSize: number;
+  selectedDocumentId?: number | null;
+  onClearDocumentFilter: () => void;
 }
 
-const ChangesTab = ({ changes, formatDateTime, formatFileSize, total, page, setPage, pageSize }: ChangesTabProps) => {
+const ChangesTab = ({ changes, formatDateTime, formatFileSize, total, page, setPage, pageSize, selectedDocumentId, onClearDocumentFilter }: ChangesTabProps) => {
   const totalPages = Math.ceil(total / pageSize);
   return (
     <Card>
       <CardHeader>
-        <CardTitle>История изменений</CardTitle>
-        <CardDescription>Новые и изменённые документы</CardDescription>
+        <div className="flex items-start justify-between">
+          <div>
+            <CardTitle>История изменений</CardTitle>
+            <CardDescription>Новые и изменённые документы</CardDescription>
+          </div>
+          {selectedDocumentId && (
+            <Button variant="outline" size="sm" onClick={onClearDocumentFilter}>
+              <Icon name="X" size={14} className="mr-1" />
+              Показать все
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
+        {selectedDocumentId && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-blue-900">
+              <Icon name="Filter" size={16} className="text-blue-600" />
+              <span>Показаны изменения для документа #{selectedDocumentId}</span>
+            </div>
+          </div>
+        )}
         <div className="space-y-4">
           {changes.length === 0 ? (
             <div className="text-center py-8 text-gray-500">

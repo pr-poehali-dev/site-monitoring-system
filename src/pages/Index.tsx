@@ -31,6 +31,7 @@ const Index = () => {
   const [telegramChatId, setTelegramChatId] = useState('');
   const [activeTab, setActiveTab] = useState('documents');
   const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const { toast } = useToast();
 
   const currentYear = new Date().getFullYear();
@@ -47,6 +48,10 @@ const Index = () => {
   useEffect(() => {
     loadDocuments();
   }, [searchQuery, selectedSection, selectedYear, sortBy, sortOrder, page]);
+
+  useEffect(() => {
+    loadChanges();
+  }, [selectedDocumentId, changesPage]);
 
   useEffect(() => {
     if (autoRefreshLogs) {
@@ -111,7 +116,11 @@ const Index = () => {
 
   const loadChanges = async () => {
     try {
-      const changesData = await apiClient.getChanges(changesPageSize);
+      const params: any = { limit: changesPageSize };
+      if (selectedDocumentId) {
+        params.document_id = selectedDocumentId;
+      }
+      const changesData = await apiClient.getChanges(params.limit, params.document_id);
       setChanges(changesData.changes || []);
       setTotalChanges(changesData.changes?.length || 0);
     } catch (error) {
@@ -274,6 +283,11 @@ const Index = () => {
     return sortOrder === 'DESC' ? '↓' : '↑';
   };
 
+  const handleViewDocumentChanges = (documentId: number) => {
+    setSelectedDocumentId(documentId);
+    setActiveTab('changes');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200">
@@ -369,6 +383,7 @@ const Index = () => {
               page={page}
               setPage={setPage}
               pageSize={pageSize}
+              onViewChanges={handleViewDocumentChanges}
             />
           </TabsContent>
 
@@ -381,6 +396,8 @@ const Index = () => {
               page={changesPage}
               setPage={setChangesPage}
               pageSize={changesPageSize}
+              selectedDocumentId={selectedDocumentId}
+              onClearDocumentFilter={() => setSelectedDocumentId(null)}
             />
           </TabsContent>
 
