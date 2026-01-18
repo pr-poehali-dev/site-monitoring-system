@@ -10,7 +10,7 @@ interface AnalyticsTabProps {
     by_publication_date: { date: string; count: number }[];
     total_documents: number;
     total_files: number;
-    total_size_mb: number;
+    total_size_mb: number | string;
   } | null;
 }
 
@@ -23,6 +23,8 @@ const COLORS = {
 const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
+  console.log('AnalyticsTab render:', analytics);
+  
   if (!analytics) {
     return (
       <Card>
@@ -36,9 +38,10 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
     );
   }
 
-  const formatSize = (mb: number) => {
-    if (mb >= 1024) return `${(mb / 1024).toFixed(2)} ГБ`;
-    return `${mb.toFixed(2)} МБ`;
+  const formatSize = (mb: number | string) => {
+    const mbNum = typeof mb === 'string' ? parseFloat(mb) : mb;
+    if (mbNum >= 1024) return `${(mbNum / 1024).toFixed(2)} ГБ`;
+    return `${mbNum.toFixed(2)} МБ`;
   };
 
   return (
