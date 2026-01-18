@@ -65,7 +65,10 @@ def handler(event: dict, context) -> dict:
     except Exception as e:
         if conn:
             try:
-                conn.rollback()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+                log_create(cursor, schema, 'system', 'error', 
+                    f'💥 КРИТИЧЕСКАЯ ОШИБКА HANDLER: {str(e)[:500]}')
+                conn.commit()
                 conn.close()
             except:
                 pass
@@ -88,30 +91,36 @@ def parse_docs(conn, schema: str, sections: list, years: list) -> dict:
     stats = {'total_processed': 0, 'new_documents': 0, 'updated_documents': 0, 'errors': 0, 'years_completed': 0}
     t_start = time.time()
     
-    # Обрабатываем по одному году за раз
-    for section in sections:
-        for year in years:
-            try:
-                elapsed = time.time() - t_start
-                if elapsed > 25:
-                    msg = f'⏱ ПАРСИНГ ПРИОСТАНОВЛЕН ПО ВРЕМЕНИ\nОбработано годов: {stats["years_completed"]}\nВремя: {int(elapsed*1000)}мс'
-                    log_create(cursor, schema, 'system', 'warning', msg)
+    try:
+        for section in sections:
+            for year in years:
+                try:
+                    elapsed = time.time() - t_start
+                    if elapsed > 25:
+                        msg = f'⏱ ПАРСИНГ ПРИОСТАНОВЛЕН ПО ВРЕМЕНИ\nОбработано годов: {stats["years_completed"]}\nВремя: {int(elapsed*1000)}мс'
+                        log_create(cursor, schema, 'system', 'warning', msg)
+                        conn.commit()
+                        break
+                    
+                    year_result = parse_single_year(conn, schema, section, year)
+                    stats['total_processed'] += year_result.get('total_processed', 0)
+                    stats['new_documents'] += year_result.get('new_documents', 0)
+                    stats['updated_documents'] += year_result.get('updated_documents', 0)
+                    stats['errors'] += year_result.get('errors', 0)
+                    stats['years_completed'] += 1
                     conn.commit()
-                    break
-                
-                year_result = parse_single_year(conn, schema, section, year)
-                stats['total_processed'] += year_result.get('total_processed', 0)
-                stats['new_documents'] += year_result.get('new_documents', 0)
-                stats['updated_documents'] += year_result.get('updated_documents', 0)
-                stats['errors'] += year_result.get('errors', 0)
-                stats['years_completed'] += 1
-                conn.commit()
-                
-            except Exception as ye:
-                stats['errors'] += 1
-                log_create(cursor, schema, section, 'error', 
-                    f'❌ Ошибка при парсинге {year} года: {str(ye)[:200]}')
-                conn.commit()
+                    
+                except Exception as ye:
+                    stats['errors'] += 1
+                    log_create(cursor, schema, section, 'error', 
+                        f'❌ Ошибка при парсинге {year} года: {str(ye)[:500]}')
+                    conn.commit()
+    
+    except Exception as global_err:
+        log_create(cursor, schema, 'system', 'error', 
+            f'💥 КРИТИЧЕСКАЯ ОШИБКА parse_docs: {str(global_err)[:500]}')
+        conn.commit()
+        stats['errors'] += 1
     
     total_dur = int((time.time() - t_start) * 1000)
     final_msg = f"""🏁 ПАРСИНГ ЗАВЕРШЕН
@@ -138,156 +147,145 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
     """Парсинг одного года с retry-механизмом"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    base_url = 'https://sychevka.admin-smolensk.ru'
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    s3 = init_s3()
-    aws_key = os.environ.get('AWS_ACCESS_KEY_ID', '')
-    
-    paths = {
-        'postanovleniya': '/docs/smolensk/postanovleniya/',
-        'rasporyazheniya': '/docs/smolensk/rasporyazheniya/',
-        'programmy': '/docs/municipalnye-programmy/'
-    }
-    
-    names = {
-        'postanovleniya': 'Постановления',
-        'rasporyazheniya': 'Распоряжения',
-        'programmy': 'Муниципальные программы'
-    }
-    
-    section_name = names.get(section, section)
-    
-    # Проверяем состояние парсинга
-    cursor.execute(
-        f"SELECT * FROM {schema}.parsing_state WHERE section = %s AND year = %s",
-        (section, year)
-    )
-    state = cursor.fetchone()
-    
-    if not state:
+    try:
+        base_url = 'https://sychevka.admin-smolensk.ru'
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        s3 = init_s3()
+        aws_key = os.environ.get('AWS_ACCESS_KEY_ID', '')
+        
+        paths = {
+            'postanovleniya': '/docs/smolensk/postanovleniya/',
+            'rasporyazheniya': '/docs/smolensk/rasporyazheniya/',
+            'programmy': '/docs/municipalnye-programmy/'
+        }
+        
+        names = {
+            'postanovleniya': 'Постановления',
+            'rasporyazheniya': 'Распоряжения',
+            'programmy': 'Муниципальные программы'
+        }
+        
+        section_name = names.get(section, section)
+        
         cursor.execute(
-            f"INSERT INTO {schema}.parsing_state (section, year, status, retry_count) VALUES (%s, %s, 'running', 0) RETURNING *",
+            f"SELECT * FROM {schema}.parsing_state WHERE section = %s AND year = %s",
             (section, year)
         )
         state = cursor.fetchone()
-        conn.commit()
-    elif state['status'] == 'completed':
+        
+        if not state:
+            cursor.execute(
+                f"INSERT INTO {schema}.parsing_state (section, year, status, retry_count) VALUES (%s, %s, 'running', 0) RETURNING *",
+                (section, year)
+            )
+            state = cursor.fetchone()
+            conn.commit()
+        elif state['status'] == 'completed':
+            log_create(cursor, schema, section, 'info', 
+                f'✓ Раздел {section_name}, год {year} уже обработан ранее')
+            conn.commit()
+            cursor.close()
+            return {'total_processed': 0, 'new_documents': 0, 'updated_documents': 0, 'errors': 0}
+        else:
+            cursor.execute(
+                f"UPDATE {schema}.parsing_state SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
+                (section, year)
+            )
+            conn.commit()
+        
+        retry_count = state['retry_count']
+        start_page = state.get('page', 1)
+        
         log_create(cursor, schema, section, 'info', 
-            f'✓ Раздел {section_name}, год {year} уже обработан ранее')
+            f'📂 Парсинг: {section_name}, год {year} (попытка {retry_count + 1}/{MAX_RETRY}, стартовая страница: {start_page})')
         conn.commit()
-        cursor.close()
-        return {'total_processed': 0, 'new_documents': 0, 'updated_documents': 0, 'errors': 0}
-    else:
-        cursor.execute(
-            f"UPDATE {schema}.parsing_state SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
-            (section, year)
-        )
-        conn.commit()
-    
-    retry_count = state['retry_count']
-    start_page = state.get('page', 1)
-    
-    log_create(cursor, schema, section, 'info', 
-        f'📂 Парсинг: {section_name}, год {year} (попытка {retry_count + 1}/{MAX_RETRY}, стартовая страница: {start_page})')
-    conn.commit()
-    
-    stats = {'new': 0, 'upd': 0, 'skip': 0, 'errors': 0, 'docs_processed': 0}
-    t1 = time.time()
-    
-    year_suffix = f'{year}-god'
-    base_section_url = urljoin(base_url, f"{paths[section]}{year_suffix}/")
-    
-    page = start_page
-    delay = INITIAL_DELAY * (2 ** retry_count)
-    if delay > MAX_DELAY:
-        delay = MAX_DELAY
-    
-    try:
+        
+        stats = {'new': 0, 'upd': 0, 'skip': 0, 'errors': 0, 'docs_processed': 0}
+        t1 = time.time()
+        
+        year_suffix = f'{year}-god'
+        base_section_url = urljoin(base_url, f"{paths[section]}{year_suffix}/")
+        
+        page = start_page
+        delay = INITIAL_DELAY * (2 ** retry_count)
+        if delay > MAX_DELAY:
+            delay = MAX_DELAY
+        
         while page <= 10 and stats['docs_processed'] < MAX_DOCS_PER_RUN:
-            try:
-                url = base_section_url if page == 1 else urljoin(base_section_url, f"page/{page}/")
-                
-                log_create(cursor, schema, section, 'info', 
-                    f'🌐 Загрузка страницы {page}, задержка {delay:.1f}с')
+            url = base_section_url if page == 1 else urljoin(base_section_url, f"page/{page}/")
+            
+            log_create(cursor, schema, section, 'info', 
+                f'🌐 Загрузка страницы {page}, задержка {delay:.1f}с')
+            conn.commit()
+            
+            time.sleep(delay)
+            resp = requests.get(url, headers=headers, timeout=10)
+            
+            if resp.status_code != 200:
+                log_create(cursor, schema, section, 'warning', 
+                    f'⚠️ Код {resp.status_code} на странице {page}, завершаем год')
                 conn.commit()
-                
-                time.sleep(delay)
-                resp = requests.get(url, headers=headers, timeout=10)
-                
-                if resp.status_code != 200:
-                    log_create(cursor, schema, section, 'warning', 
-                        f'⚠️ Код {resp.status_code} на странице {page}, завершаем год')
-                    conn.commit()
+                break
+            
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            items = soup.find_all('div', class_='docs__item')
+            
+            if not items:
+                log_create(cursor, schema, section, 'info', 
+                    f'✓ Документов больше нет (страница {page}), год завершен')
+                conn.commit()
+                break
+            
+            pg_new = 0
+            pg_upd = 0
+            pg_skip = 0
+            
+            for item in items:
+                if stats['docs_processed'] >= MAX_DOCS_PER_RUN:
                     break
                 
-                soup = BeautifulSoup(resp.text, 'html.parser')
-                items = soup.find_all('div', class_='docs__item')
-                
-                if not items:
-                    log_create(cursor, schema, section, 'info', 
-                        f'✓ Документов больше нет (страница {page}), год завершен')
-                    conn.commit()
-                    break
-                
-                pg_new = 0
-                pg_upd = 0
-                pg_skip = 0
-                
-                for item in items:
-                    if stats['docs_processed'] >= MAX_DOCS_PER_RUN:
-                        break
+                try:
+                    res = process_doc(cursor, schema, item, section, section_name, 
+                                    base_url, url, s3, aws_key, headers)
+                    stats['docs_processed'] += 1
                     
-                    try:
-                        res = process_doc(cursor, schema, item, section, section_name, 
-                                        base_url, url, s3, aws_key, headers)
-                        stats['docs_processed'] += 1
+                    if res == 'new':
+                        pg_new += 1
+                        stats['new'] += 1
+                    elif res == 'upd':
+                        pg_upd += 1
+                        stats['upd'] += 1
+                    elif res == 'skip':
+                        pg_skip += 1
+                        stats['skip'] += 1
                         
-                        if res == 'new':
-                            pg_new += 1
-                            stats['new'] += 1
-                        elif res == 'upd':
-                            pg_upd += 1
-                            stats['upd'] += 1
-                        elif res == 'skip':
-                            pg_skip += 1
-                            stats['skip'] += 1
-                            
-                    except Exception as de:
-                        stats['errors'] += 1
-                        log_create(cursor, schema, section, 'error', 
-                            f'❌ Ошибка обработки документа: {str(de)[:150]}')
-                        conn.commit()
-                
-                log_create(cursor, schema, section, 'info', 
-                    f'📄 Страница {page}: Новых {pg_new}, изменено {pg_upd}, без изменений {pg_skip}')
-                conn.commit()
-                
-                # Обновляем состояние после каждой страницы
-                cursor.execute(
-                    f"UPDATE {schema}.parsing_state SET page = %s, updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
-                    (page, section, year)
-                )
-                conn.commit()
-                
-                # Проверяем наличие следующей страницы
-                pageline = soup.find('div', class_='b-pageline')
-                has_next = False
-                if pageline:
-                    nl = pageline.find('a', class_='pageline__next2')
-                    if nl and nl.get('href'):
-                        has_next = True
-                
-                if not has_next:
-                    break
-                
-                page += 1
-                
-            except Exception as pe:
-                stats['errors'] += 1
-                log_create(cursor, schema, section, 'error', 
-                    f'❌ Ошибка загрузки страницы {page}: {str(pe)[:150]}')
-                conn.commit()
-                raise
+                except Exception as de:
+                    stats['errors'] += 1
+                    log_create(cursor, schema, section, 'error', 
+                        f'❌ Ошибка обработки документа: {str(de)[:150]}')
+                    conn.commit()
+            
+            log_create(cursor, schema, section, 'info', 
+                f'📄 Страница {page}: Новых {pg_new}, изменено {pg_upd}, без изменений {pg_skip}')
+            conn.commit()
+            
+            cursor.execute(
+                f"UPDATE {schema}.parsing_state SET page = %s, updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
+                (page, section, year)
+            )
+            conn.commit()
+            
+            pageline = soup.find('div', class_='b-pageline')
+            has_next = False
+            if pageline:
+                nl = pageline.find('a', class_='pageline__next2')
+                if nl and nl.get('href'):
+                    has_next = True
+            
+            if not has_next:
+                break
+            
+            page += 1
         
         # Успешно завершили
         cursor.execute(
@@ -310,8 +308,10 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         }
         
     except Exception as e:
-        # Ошибка - увеличиваем счетчик повторов
+        stats['errors'] += 1
         new_retry = retry_count + 1
+        
+        error_msg = f'💥 КРИТИЧЕСКАЯ ОШИБКА parse_single_year ({section}, {year}):\n{str(e)[:500]}'
         
         if new_retry < MAX_RETRY:
             cursor.execute(
@@ -325,12 +325,16 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                 f"UPDATE {schema}.parsing_state SET status = 'failed', last_error = %s, updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
                 (str(e)[:500], section, year)
             )
-            log_create(cursor, schema, section, 'error', 
-                f'💥 Парсинг года {year} провален после {MAX_RETRY} попыток: {str(e)[:200]}')
+            log_create(cursor, schema, section, 'error', error_msg)
         
         conn.commit()
         cursor.close()
-        raise
+        return {
+            'total_processed': stats.get('docs_processed', 0),
+            'new_documents': stats.get('new', 0),
+            'updated_documents': stats.get('upd', 0),
+            'errors': stats.get('errors', 1)
+        }
 
 
 def process_doc(cursor, schema, item, section, section_name, base_url, page_url, s3, aws_key, headers):
