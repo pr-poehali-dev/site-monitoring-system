@@ -409,11 +409,7 @@ def process_doc(cursor, schema, item, section, section_name, base_url, page_url,
             f"INSERT INTO {schema}.documents (title, url, section, published_date, document_number, document_date, content_hash, file_size, file_path, file_cdn_url, changes_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0) RETURNING id",
             (full_title, file_url, section_name, pub_date, doc_num, doc_date, fhash, fsize, fpath, cdn_url)
         )
-        did = cursor.fetchone()['id']
-        cursor.execute(
-            f"INSERT INTO {schema}.document_changes (document_id, change_type, new_content_hash, new_title, new_file_size) VALUES (%s, 'new', %s, %s, %s)",
-            (did, fhash, full_title, fsize)
-        )
+        cursor.fetchone()['id']
         return 'new'
 
 

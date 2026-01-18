@@ -7,9 +7,14 @@ interface ChangesTabProps {
   changes: any[];
   formatDateTime: (dateStr: string) => string;
   formatFileSize: (bytes: number) => string;
+  total: number;
+  page: number;
+  setPage: (page: number) => void;
+  pageSize: number;
 }
 
-const ChangesTab = ({ changes, formatDateTime, formatFileSize }: ChangesTabProps) => {
+const ChangesTab = ({ changes, formatDateTime, formatFileSize, total, page, setPage, pageSize }: ChangesTabProps) => {
+  const totalPages = Math.ceil(total / pageSize);
   return (
     <Card>
       <CardHeader>
@@ -74,6 +79,29 @@ const ChangesTab = ({ changes, formatDateTime, formatFileSize }: ChangesTabProps
             ))
           )}
         </div>
+        {totalPages > 1 && (
+          <div className="flex justify-center items-center gap-2 pt-4 border-t">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(page - 1)}
+              disabled={page === 1}
+            >
+              <Icon name="ChevronLeft" size={16} />
+            </Button>
+            <div className="text-sm text-gray-600">
+              Страница {page} из {totalPages}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(page + 1)}
+              disabled={page === totalPages}
+            >
+              <Icon name="ChevronRight" size={16} />
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

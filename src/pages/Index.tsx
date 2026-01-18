@@ -14,10 +14,16 @@ const Index = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSection, setSelectedSection] = useState('all');
   const [selectedYear, setSelectedYear] = useState('all');
-  const [sortBy, setSortBy] = useState('created_at');
+  const [sortBy, setSortBy] = useState('published_date');
   const [sortOrder, setSortOrder] = useState('DESC');
   const [documents, setDocuments] = useState<any[]>([]);
+  const [totalDocuments, setTotalDocuments] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
   const [changes, setChanges] = useState<any[]>([]);
+  const [totalChanges, setTotalChanges] = useState(0);
+  const [changesPage, setChangesPage] = useState(1);
+  const [changesPageSize] = useState(20);
   const [logs, setLogs] = useState<any[]>([]);
   const [stats, setStats] = useState({ total_documents: 0, changes_this_week: 0, active_sections: 0 });
   const [settings, setSettings] = useState<any>({});
@@ -35,8 +41,12 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
+    setPage(1);
+  }, [searchQuery, selectedSection, selectedYear]);
+
+  useEffect(() => {
     loadDocuments();
-  }, [searchQuery, selectedSection, selectedYear, sortBy, sortOrder]);
+  }, [searchQuery, selectedSection, selectedYear, sortBy, sortOrder, page]);
 
   useEffect(() => {
     if (autoRefreshLogs) {
@@ -69,6 +79,7 @@ const Index = () => {
       
       setStats(statsData);
       setDocuments(docsData.documents || []);
+      setTotalDocuments(docsData.total || 0);
       setChanges(changesData.changes || []);
       setLogs(logsData.logs || []);
       setSettings(settingsData.settings || {});
@@ -80,7 +91,10 @@ const Index = () => {
 
   const loadDocuments = async () => {
     try {
-      const params: any = { limit: 100 };
+      const params: any = { 
+        limit: pageSize,
+        offset: (page - 1) * pageSize
+      };
       if (searchQuery) params.search = searchQuery;
       if (selectedSection !== 'all') params.section = selectedSection;
       if (selectedYear !== 'all') params.year = selectedYear;
@@ -89,8 +103,19 @@ const Index = () => {
 
       const docsData = await apiClient.getDocuments(params);
       setDocuments(docsData.documents || []);
+      setTotalDocuments(docsData.total || 0);
     } catch (error) {
       console.error('Failed to load documents:', error);
+    }
+  };
+
+  const loadChanges = async () => {
+    try {
+      const changesData = await apiClient.getChanges(changesPageSize);
+      setChanges(changesData.changes || []);
+      setTotalChanges(changesData.changes?.length || 0);
+    } catch (error) {
+      console.error('Failed to load changes:', error);
     }
   };
 
@@ -267,6 +292,10 @@ const Index = () => {
               formatDate={formatDate}
               formatDateTime={formatDateTime}
               formatFileSize={formatFileSize}
+              total={totalDocuments}
+              page={page}
+              setPage={setPage}
+              pageSize={pageSize}
             />
           </TabsContent>
 
@@ -275,6 +304,10 @@ const Index = () => {
               changes={changes}
               formatDateTime={formatDateTime}
               formatFileSize={formatFileSize}
+              total={totalChanges}
+              page={changesPage}
+              setPage={setChangesPage}
+              pageSize={changesPageSize}
             />
           </TabsContent>
 

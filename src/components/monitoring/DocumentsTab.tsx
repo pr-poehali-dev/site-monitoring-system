@@ -22,6 +22,10 @@ interface DocumentsTabProps {
   formatDate: (dateStr: string) => string;
   formatDateTime: (dateStr: string) => string;
   formatFileSize: (bytes: number) => string;
+  total: number;
+  page: number;
+  setPage: (page: number) => void;
+  pageSize: number;
 }
 
 const DocumentsTab = ({
@@ -39,8 +43,13 @@ const DocumentsTab = ({
   getSortIcon,
   formatDate,
   formatDateTime,
-  formatFileSize
+  formatFileSize,
+  total,
+  page,
+  setPage,
+  pageSize
 }: DocumentsTabProps) => {
+  const totalPages = Math.ceil(total / pageSize);
   return (
     <Card>
       <CardHeader>
@@ -100,9 +109,9 @@ const DocumentsTab = ({
                 </TableHead>
                 <TableHead 
                   className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => handleSort('created_at')}
+                  onClick={() => handleSort('published_date')}
                 >
-                  Загружено {getSortIcon('created_at')}
+                  Дата публикации {getSortIcon('published_date')}
                 </TableHead>
                 <TableHead 
                   className="cursor-pointer hover:bg-gray-50"
@@ -137,7 +146,7 @@ const DocumentsTab = ({
                     {formatDate(doc.document_date)}
                   </TableCell>
                   <TableCell className="text-gray-600 text-sm">
-                    {formatDateTime(doc.created_at)}
+                    {formatDate(doc.published_date)}
                   </TableCell>
                   <TableCell className="text-gray-600 text-sm">
                     {formatFileSize(doc.file_size)}
@@ -169,7 +178,30 @@ const DocumentsTab = ({
         </div>
 
         <div className="flex justify-between items-center text-sm text-gray-600">
-          <div>Показано документов: {documents.length}</div>
+          <div>Показано {documents.length} из {total} документов</div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(page - 1)}
+                disabled={page === 1}
+              >
+                <Icon name="ChevronLeft" size={16} />
+              </Button>
+              <div className="text-sm">
+                Страница {page} из {totalPages}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(page + 1)}
+                disabled={page === totalPages}
+              >
+                <Icon name="ChevronRight" size={16} />
+              </Button>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
