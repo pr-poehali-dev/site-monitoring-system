@@ -74,9 +74,34 @@ const ChangesTab = ({ changes, formatDateTime, formatFileSize, total, page, setP
                         </span>
                       </div>
                       {change.change_type === 'modified' && (
-                        <div className="text-xs text-gray-500 mt-2">
-                          {change.old_file_size && change.new_file_size && (
-                            <div>Размер: {formatFileSize(change.old_file_size)} → {formatFileSize(change.new_file_size)}</div>
+                        <div className="mt-3 space-y-2">
+                          {change.old_title !== change.new_title && change.old_title && change.new_title && (
+                            <div className="text-xs p-2 bg-yellow-50 border border-yellow-200 rounded">
+                              <div className="font-medium text-yellow-900 mb-1">📝 Название изменено:</div>
+                              <div className="text-yellow-700">
+                                <div className="line-through">{change.old_title}</div>
+                                <div className="mt-1">→ {change.new_title}</div>
+                              </div>
+                            </div>
+                          )}
+                          {change.old_file_size !== change.new_file_size && change.old_file_size && change.new_file_size && (
+                            <div className="text-xs p-2 bg-blue-50 border border-blue-200 rounded">
+                              <div className="font-medium text-blue-900 mb-1">📦 Размер файла:</div>
+                              <div className="text-blue-700">
+                                {formatFileSize(change.old_file_size)} → {formatFileSize(change.new_file_size)}
+                                {change.new_file_size > change.old_file_size ? ' (увеличился)' : ' (уменьшился)'}
+                              </div>
+                            </div>
+                          )}
+                          {change.old_content_hash !== change.new_content_hash && change.old_content_hash && change.new_content_hash && (
+                            <div className="text-xs p-2 bg-orange-50 border border-orange-200 rounded">
+                              <div className="font-medium text-orange-900 mb-1">📄 Содержимое файла изменено</div>
+                              <div className="text-orange-700 flex items-center gap-2">
+                                {change.old_file_size === change.new_file_size && (
+                                  <span>(размер не изменился, но содержимое обновлено)</span>
+                                )}
+                              </div>
+                            </div>
                           )}
                         </div>
                       )}
@@ -85,10 +110,17 @@ const ChangesTab = ({ changes, formatDateTime, formatFileSize, total, page, setP
                       <Badge variant={change.change_type === 'new' ? 'default' : 'secondary'}>
                         {change.change_type === 'new' ? 'Новый' : 'Изменён'}
                       </Badge>
-                      {change.file_cdn_url && (
+                      {change.current_files && change.current_files.length > 0 && (
                         <Button variant="ghost" size="sm" asChild>
-                          <a href={change.file_cdn_url} target="_blank" rel="noopener noreferrer">
+                          <a href={change.current_files[0].file_cdn_url || change.current_files[0].file_url} target="_blank" rel="noopener noreferrer" title="Скачать текущую версию">
                             <Icon name="Download" size={14} />
+                          </a>
+                        </Button>
+                      )}
+                      {change.url && (
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={change.url} target="_blank" rel="noopener noreferrer" title="Открыть на сайте">
+                            <Icon name="ExternalLink" size={14} />
                           </a>
                         </Button>
                       )}

@@ -191,7 +191,8 @@ def get_changes(cursor, schema: str, params: dict) -> dict:
     cursor.execute(f"""
         SELECT dc.id, dc.change_type, dc.detected_at, dc.notified,
                dc.old_title, dc.new_title, dc.old_file_size, dc.new_file_size,
-               d.title, d.url, d.section, d.file_cdn_url
+               dc.old_content_hash, dc.new_content_hash,
+               d.title, d.url, d.section, d.file_cdn_url, d.document_number
         FROM {schema}.document_changes dc
         JOIN {schema}.documents d ON dc.document_id = d.id
         {where_clause}
@@ -200,6 +201,19 @@ def get_changes(cursor, schema: str, params: dict) -> dict:
     """, (*query_params, limit))
     
     changes = cursor.fetchall()
+    
+    # Для каждого изменения получаем старые файлы (если есть)
+    for change in changes:
+        # Текущие файлы документа
+        cursor.execute(f"""
+            SELECT file_url, file_cdn_url, file_type, file_name 
+            FROM {schema}.document_files 
+            WHERE document_id = (
+                SELECT document_id FROM {schema}.document_changes WHERE id = %s
+            )
+            ORDER BY CASE WHEN file_type = 'main' THEN 0 ELSE 1 END
+        """, (change['id'],))
+        change['current_files'] = cursor.fetchall()
     
     return {'changes': changes}
 
@@ -446,6 +460,15 @@ def clean_old_logs(cursor, schema: str, days: int = 7) -> dict:
 
 def get_file_download_stats(cursor, schema: str) -> dict:
     """Получение статистики по загрузке файлов"""
+    # Автоисправление: помечаем файлы с CDN URL как downloaded
+    cursor.execute(f"""
+        UPDATE {schema}.document_files
+        SET download_status = 'downloaded'
+        WHERE download_status = 'pending' 
+            AND file_cdn_url IS NOT NULL 
+            AND file_cdn_url != ''
+    """)
+    
     # Всего файлов по статусам
     cursor.execute(f"""
         SELECT download_status, COUNT(*) as count
