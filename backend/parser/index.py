@@ -281,8 +281,21 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
             soup = BeautifulSoup(resp.text, 'html.parser')
             items = soup.find_all('div', class_='docs__item')
             
-            # Проверяем старый табличный формат (2009-2015)
+            # Проверка на редирект на главную (когда появляется таблица годов)
             if not items:
+                # Ищем признак главной страницы архива (таблица с годами)
+                year_table = soup.find('table')
+                if year_table:
+                    # Проверяем, есть ли в таблице ссылки на годы (2025-god, 2024-god и т.д.)
+                    year_links = year_table.find_all('a', href=True)
+                    has_year_links = any('-god' in link['href'] for link in year_links)
+                    if has_year_links:
+                        log_create(cursor, schema, section, 'info', 
+                            f'⚠️ Редирект на главную архива (страница {page}), документы закончились')
+                        conn.commit()
+                        break
+                
+                # Проверяем старый табличный формат (2009-2015)
                 old_table = soup.find('div', class_='b-editor')
                 if old_table:
                     table = old_table.find('table')
