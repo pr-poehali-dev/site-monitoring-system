@@ -1122,7 +1122,7 @@ def continue_parsing(conn, schema: str, auto_loop: bool = False) -> dict:
     cursor.execute(f"""
         SELECT section, year, page, status 
         FROM {schema}.parsing_state 
-        WHERE status IN ('running', 'retry', 'pending')
+        WHERE status IN ('running', 'retry', 'pending', 'partial')
         ORDER BY 
             CASE section 
                 WHEN 'programmy' THEN 1 
