@@ -29,6 +29,7 @@ const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
   const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
+  const [zoomRange, setZoomRange] = useState<'all' | '1year' | '6months' | '3months' | '1month'>('all');
   console.log('AnalyticsTab render:', analytics);
   
   if (!analytics) {
@@ -65,6 +66,28 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
 
   const yearChartData = getYearChartData();
   const totalInYearChart = yearChartData.reduce((sum, item) => sum + item.count, 0);
+
+  // Фильтрация данных динамики публикаций по выбранному периоду
+  const getPublicationChartData = () => {
+    if (!analytics) return [];
+    
+    const now = new Date();
+    const data = analytics.by_publication_date;
+    
+    if (zoomRange === 'all') return data;
+    
+    const daysMap: Record<string, number> = {
+      '1month': 30,
+      '3months': 90,
+      '6months': 180,
+      '1year': 365
+    };
+    
+    const daysToShow = daysMap[zoomRange];
+    return data.slice(-daysToShow);
+  };
+
+  const publicationChartData = getPublicationChartData();
 
   return (
     <div className="space-y-6">
@@ -305,17 +328,61 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
       {/* Динамика публикаций */}
       <Card>
         <CardHeader>
-          <CardTitle>Динамика публикаций документов</CardTitle>
-          <CardDescription>Количество опубликованных документов по дням (последние 5 лет = {analytics.by_publication_date.length} дней)</CardDescription>
+          <div className="flex flex-col gap-4">
+            <div>
+              <CardTitle>Динамика публикаций документов</CardTitle>
+              <CardDescription>Количество опубликованных документов по дням (последние 5 лет = {analytics.by_publication_date.length} дней)</CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="text-sm text-gray-600 mr-2 flex items-center">Период:</span>
+              <Button 
+                variant={zoomRange === 'all' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setZoomRange('all')}
+              >
+                <Icon name="Maximize2" size={14} className="mr-1" />
+                Всё (5 лет)
+              </Button>
+              <Button 
+                variant={zoomRange === '1year' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setZoomRange('1year')}
+              >
+                1 год
+              </Button>
+              <Button 
+                variant={zoomRange === '6months' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setZoomRange('6months')}
+              >
+                6 месяцев
+              </Button>
+              <Button 
+                variant={zoomRange === '3months' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setZoomRange('3months')}
+              >
+                3 месяца
+              </Button>
+              <Button 
+                variant={zoomRange === '1month' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setZoomRange('1month')}
+              >
+                1 месяц
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={analytics.by_publication_date}>
+            <LineChart data={publicationChartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis 
                 dataKey="date" 
-                tick={false}
-                label={{ value: 'Дата', position: 'insideBottom', offset: -5, style: { fontSize: 12 } }}
+                tick={zoomRange === 'all' ? false : { fontSize: 10, angle: -45, textAnchor: 'end' }}
+                height={zoomRange === 'all' ? 30 : 80}
+                label={zoomRange === 'all' ? { value: 'Дата', position: 'insideBottom', offset: -5, style: { fontSize: 12 } } : undefined}
               />
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip 
@@ -326,27 +393,40 @@ const AnalyticsTab = ({ analytics }: AnalyticsTabProps) => {
                 }}
                 labelFormatter={(value) => `Дата: ${value}`}
               />
-              <Legend />
               <Line 
                 type="monotone" 
                 dataKey="count" 
                 stroke="#f59e0b" 
-                strokeWidth={1}
-                dot={false}
+                strokeWidth={zoomRange === 'all' ? 1 : 2}
+                dot={zoomRange === '1month' || zoomRange === '3months'}
                 name="Документов"
               />
             </LineChart>
           </ResponsiveContainer>
 
-          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-start gap-3">
-              <Icon name="Info" size={18} className="text-blue-600 mt-0.5" />
-              <div className="text-sm text-blue-900">
-                <p className="font-medium mb-1">Анализ динамики публикаций</p>
-                <p className="text-xs text-blue-700">
-                  График показывает количество документов, опубликованных на сайте за каждый день в последние 5 лет (включая дни с 0 публикаций). 
-                  Каждый пиксель соответствует 1 дню. Пики активности могут указывать на важные события или плановые публикации.
-                </p>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-start gap-3">
+                <Icon name="Info" size={18} className="text-blue-600 mt-0.5" />
+                <div className="text-sm text-blue-900">
+                  <p className="font-medium mb-1">Анализ динамики публикаций</p>
+                  <p className="text-xs text-blue-700">
+                    График показывает количество документов, опубликованных на сайте за каждый день (включая дни с 0 публикаций). 
+                    Пики активности могут указывать на важные события или плановые публикации.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-start gap-3">
+                <Icon name="ZoomIn" size={18} className="text-green-600 mt-0.5" />
+                <div className="text-sm text-green-900">
+                  <p className="font-medium mb-1">Масштабирование графика</p>
+                  <p className="text-xs text-green-700">
+                    Выберите период для детального просмотра. На больших периодах (1-5 лет) точки скрыты для лучшей читаемости.
+                    На коротких периодах (1-3 месяца) точки видны для точности.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
