@@ -73,14 +73,15 @@ export const apiClient = {
     return response.json();
   },
 
-  async runParser(sections: string[], years: number[]) {
+  async runParser(sections: string[], years: number[], force: boolean = false) {
     fetch(PARSER_BASE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'parse',
         sections,
-        years
+        years,
+        force
       })
     }).catch(() => {});
     

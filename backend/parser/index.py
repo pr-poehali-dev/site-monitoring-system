@@ -49,7 +49,8 @@ def handler(event: dict, context) -> dict:
             if action == 'parse':
                 sections = body.get('sections', ['postanovleniya'])
                 years = body.get('years', [2025])
-                result = parse_docs(conn, schema, sections, years)
+                force = body.get('force', False)
+                result = parse_docs(conn, schema, sections, years, force)
                 conn.commit()
                 conn.close()
                 return success_response(result)
@@ -91,7 +92,7 @@ def handler(event: dict, context) -> dict:
         return error_response(f'Критическая ошибка обработчика: {str(e)}', 500)
 
 
-def parse_docs(conn, schema: str, sections: list, years: list) -> dict:
+def parse_docs(conn, schema: str, sections: list, years: list, force: bool = False) -> dict:
     """Парсинг по годам с продолжением после таймаутов"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -109,9 +110,16 @@ def parse_docs(conn, schema: str, sections: list, years: list) -> dict:
                 f"SELECT id FROM {schema}.parsing_state WHERE section = %s AND year = %s",
                 (section, year)
             )
-            if not cursor.fetchone():
+            existing = cursor.fetchone()
+            if not existing:
                 cursor.execute(
                     f"INSERT INTO {schema}.parsing_state (section, year, page, status, retry_count) VALUES (%s, %s, 1, 'pending', 0)",
+                    (section, year)
+                )
+            elif force:
+                # При force сбрасываем completed на pending
+                cursor.execute(
+                    f"UPDATE {schema}.parsing_state SET status = 'pending', page = 1, retry_count = 0 WHERE section = %s AND year = %s",
                     (section, year)
                 )
     conn.commit()
@@ -634,8 +642,10 @@ def continue_parsing(conn, schema: str, auto_loop: bool = False) -> dict:
     
     # Если включён режим авто-цикла, запускаем следующую итерацию
     if auto_loop:
-        cursor.execute(f"SELECT COUNT(*) as pending FROM {schema}.parsing_state WHERE status IN ('running', 'retry', 'pending')")
-        pending = cursor.fetchone()['pending']
+        cursor2 = conn.cursor(cursor_factory=RealDictCursor)
+        cursor2.execute(f"SELECT COUNT(*) as pending FROM {schema}.parsing_state WHERE status IN ('running', 'retry', 'pending')")
+        pending = cursor2.fetchone()['pending']
+        cursor2.close()
         
         if pending > 0:
             try:
