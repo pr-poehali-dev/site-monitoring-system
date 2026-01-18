@@ -277,6 +277,20 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
             soup = BeautifulSoup(resp.text, 'html.parser')
             items = soup.find_all('div', class_='docs__item')
             
+            # Проверяем старый табличный формат (2009-2015)
+            if not items:
+                old_table = soup.find('div', class_='b-editor')
+                if old_table:
+                    table = old_table.find('table')
+                    if table:
+                        rows = table.find_all('tr')
+                        # Пропускаем заголовок таблицы (первая строка)
+                        items = [row for row in rows[1:] if row.find('a')]
+                        if items:
+                            log_create(cursor, schema, section, 'info', 
+                                f'📊 Найден старый табличный формат: {len(items)} документов')
+                            conn.commit()
+            
             if not items:
                 log_create(cursor, schema, section, 'info', 
                     f'✓ Документов больше нет (страница {page}), год завершен')
@@ -292,8 +306,15 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                     break
                 
                 try:
-                    res = process_doc(cursor, schema, item, section, section_name, 
-                                    base_url, url, s3, aws_key, headers)
+                    # Определяем формат документа (новый блочный или старый табличный)
+                    is_table_row = item.name == 'tr'
+                    
+                    if is_table_row:
+                        res = process_doc_table(cursor, schema, item, section, section_name, 
+                                        base_url, url, s3, aws_key, headers, year)
+                    else:
+                        res = process_doc(cursor, schema, item, section, section_name, 
+                                        base_url, url, s3, aws_key, headers)
                     stats['docs_processed'] += 1
                     
                     if res == 'new':
@@ -407,6 +428,131 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
             'updated_documents': stats.get('upd', 0),
             'errors': stats.get('errors', 1)
         }
+
+
+def process_doc_table(cursor, schema, row, section, section_name, base_url, page_url, s3, aws_key, headers, year):
+    """Обработка документа из табличного формата (2009-2015)"""
+    cells = row.find_all('td')
+    if len(cells) < 4:
+        return 'skip'
+    
+    # Структура: [Номер, Дата, Название, Скачать, Актуальность]
+    number_cell = cells[0]
+    date_cell = cells[1]
+    title_cell = cells[2]
+    download_cell = cells[3]
+    
+    # Извлекаем основную ссылку на файл
+    file_link = download_cell.find('a')
+    if not file_link:
+        return 'skip'
+    
+    file_url = urljoin(base_url, file_link.get('href', ''))
+    
+    # Извлекаем номер документа
+    doc_num = number_cell.get_text(strip=True)
+    
+    # Извлекаем дату документа
+    doc_date_text = date_cell.get_text(strip=True)
+    doc_date = None
+    if doc_date_text and '.' in doc_date_text:
+        parts = doc_date_text.split('.')
+        if len(parts) == 3:
+            doc_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+    
+    # Извлекаем название
+    title = title_cell.get_text(strip=True)
+    if not title:
+        title = f"Документ №{doc_num} от {doc_date_text}"
+    
+    # URL документа = URL файла (в старом формате нет отдельной страницы)
+    doc_url = file_url
+    
+    # Обрабатываем файл
+    all_files = []
+    fsize = 0
+    fhash = ''
+    fpath = ''
+    cdn_url = ''
+    
+    try:
+        fr = requests.get(file_url, headers=headers, timeout=8)
+        fc = fr.content
+        fsize = len(fc)
+        fhash = hashlib.sha256(fc).hexdigest()
+        
+        if s3 and fsize > 0 and aws_key:
+            fext = file_url.split('.')[-1].lower() if '.' in file_url else 'bin'
+            fname_part = f"{doc_num or 'unk'}_main_{fhash[:8]}"
+            fpath = f'docs/{section}/{fname_part}.{fext}'
+            s3.put_object(Bucket='files', Key=fpath, Body=fc, ContentType=get_ctype(fext))
+            cdn_url = f'https://cdn.poehali.dev/projects/{aws_key}/bucket/{fpath}'
+    except Exception:
+        fhash = hashlib.sha256(file_url.encode()).hexdigest()
+    
+    # Извлекаем имя файла из ссылки
+    file_name = file_url.split('/')[-1] if '/' in file_url else 'document'
+    
+    all_files.append({
+        'url': file_url,
+        'name': file_name,
+        'type': 'main',
+        'size': fsize,
+        'hash': fhash,
+        'path': fpath,
+        'cdn_url': cdn_url
+    })
+    
+    if not all_files:
+        return 'skip'
+    
+    main_file = all_files[0]
+    
+    cursor.execute(
+        f"SELECT id, content_hash, title, file_size, changes_count FROM {schema}.documents WHERE url = %s",
+        (doc_url,)
+    )
+    ex = cursor.fetchone()
+    
+    if ex:
+        if ex['content_hash'] != main_file['hash'] or ex['file_size'] != main_file['size']:
+            cursor.execute(
+                f"UPDATE {schema}.documents SET content_hash = %s, title = %s, file_size = %s, file_path = %s, file_cdn_url = %s, updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, changes_count = changes_count + 1 WHERE id = %s",
+                (main_file['hash'], title, main_file['size'], main_file['path'], main_file['cdn_url'], ex['id'])
+            )
+            cursor.execute(
+                f"INSERT INTO {schema}.document_changes (document_id, change_type, old_content_hash, new_content_hash, old_title, new_title, old_file_size, new_file_size) VALUES (%s, 'modified', %s, %s, %s, %s, %s, %s)",
+                (ex['id'], ex['content_hash'], main_file['hash'], ex['title'], title, ex['file_size'], main_file['size'])
+            )
+            
+            cursor.execute(f"DELETE FROM {schema}.document_files WHERE document_id = %s", (ex['id'],))
+            for f in all_files:
+                cursor.execute(
+                    f"INSERT INTO {schema}.document_files (document_id, file_url, file_type, file_name, file_size, file_path, file_cdn_url, content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (ex['id'], f['url'], f['type'], f['name'], f['size'], f['path'], f['cdn_url'], f['hash'])
+                )
+            
+            return 'upd'
+        else:
+            cursor.execute(
+                f"UPDATE {schema}.documents SET last_checked_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (ex['id'],)
+            )
+            return 'skip'
+    else:
+        cursor.execute(
+            f"INSERT INTO {schema}.documents (title, url, section, published_date, document_number, document_date, content_hash, file_size, file_path, file_cdn_url, changes_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0) RETURNING id",
+            (title, doc_url, section_name, doc_date, doc_num, doc_date, main_file['hash'], main_file['size'], main_file['path'], main_file['cdn_url'])
+        )
+        did = cursor.fetchone()['id']
+        
+        for f in all_files:
+            cursor.execute(
+                f"INSERT INTO {schema}.document_files (document_id, file_url, file_type, file_name, file_size, file_path, file_cdn_url, content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (did, f['url'], f['type'], f['name'], f['size'], f['path'], f['cdn_url'], f['hash'])
+            )
+        
+        return 'new'
 
 
 def process_doc(cursor, schema, item, section, section_name, base_url, page_url, s3, aws_key, headers):
