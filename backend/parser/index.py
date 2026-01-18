@@ -11,8 +11,8 @@ from psycopg2.extras import RealDictCursor
 import boto3
 
 MAX_RETRY = 3
-MAX_DOCS_PER_RUN = 100
-MAX_PAGES_PER_RUN = 30
+MAX_DOCS_PER_RUN = 200
+MAX_PAGES_PER_RUN = 50
 INITIAL_DELAY = 0.5
 MAX_DELAY = 5.0
 PARSER_BASE_URL = os.environ.get('PARSER_URL', 'https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c')
@@ -326,15 +326,15 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                     # Определяем формат документа (новый блочный или старый табличный)
                     is_table_row = item.name == 'tr'
                     
-                    # Для старых годов (2009-2015) отключаем загрузку в S3 для ускорения
-                    skip_s3 = year <= 2015
+                    # Отключаем загрузку в S3 для всех годов (только метаданные)
+                    skip_s3 = True
                     
                     if is_table_row:
                         res = process_doc_table(cursor, schema, item, section, section_name, 
-                                        base_url, url, None if skip_s3 else s3, aws_key, headers, year)
+                                        base_url, url, None, aws_key, headers, year)
                     else:
                         res = process_doc(cursor, schema, item, section, section_name, 
-                                        base_url, url, None if skip_s3 else s3, aws_key, headers)
+                                        base_url, url, None, aws_key, headers)
                     stats['docs_processed'] += 1
                     
                     if res == 'new':
