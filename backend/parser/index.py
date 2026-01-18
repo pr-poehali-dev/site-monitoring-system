@@ -98,108 +98,127 @@ def parse_documents(conn, schema: str, sections: list, years: list) -> dict:
         try:
             for year in years:
                 year_suffix = f'{year}-god' if year >= 2009 else str(year)
-                section_url = urljoin(base_url, f"{section_paths[section]}{year_suffix}/")
+                base_section_url = urljoin(base_url, f"{section_paths[section]}{year_suffix}/")
                 
-                try:
-                    response = requests.get(section_url, timeout=30)
-                    if response.status_code != 200:
-                        continue
+                page = 1
+                while True:
+                    if page == 1:
+                        section_url = base_section_url
+                    else:
+                        section_url = urljoin(base_section_url, f"page/{page}/")
                     
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    doc_items = soup.find_all('div', class_='docs__item')
-                    
-                    if not doc_items:
-                        continue
-                    
-                    for item in doc_items:
-                        try:
-                            title_elem = item.find('a', class_='docs__title')
-                            if not title_elem:
-                                continue
-                            
-                            title = title_elem.get_text(strip=True)
-                            doc_page_url = urljoin(section_url, title_elem.get('href', ''))
-                            
-                            inner_title_elem = item.find('div', class_='docs__inner-title')
-                            if inner_title_elem:
-                                full_title = f"{title}: {inner_title_elem.get_text(strip=True)}"
-                            else:
-                                full_title = title
-                            
-                            date_elem = item.find('div', class_='docs__date')
-                            pub_date = None
-                            if date_elem:
-                                date_text = date_elem.get_text(strip=True)
-                                try:
-                                    pub_date = datetime.strptime(date_text.split()[0], '%d.%m.%Y').date()
-                                except:
-                                    pub_date = None
-                            
-                            file_link_elem = item.find('a', class_='docs__file-link')
-                            if file_link_elem:
-                                file_url = urljoin(section_url, file_link_elem.get('href', ''))
-                            else:
-                                file_url = doc_page_url
-                            
+                    try:
+                        response = requests.get(section_url, timeout=30)
+                        if response.status_code != 200:
+                            break
+                        
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        doc_items = soup.find_all('div', class_='docs__item')
+                        
+                        if not doc_items:
+                            break
+                        
+                        has_next_page = False
+                        pageline = soup.find('div', class_='b-pageline')
+                        if pageline:
+                            next_link = pageline.find('a', class_='pageline__next2')
+                            if next_link and next_link.get('href'):
+                                has_next_page = True
+                        
+                        for item in doc_items:
                             try:
-                                doc_response = requests.get(file_url, timeout=15)
-                                content_hash = hashlib.sha256(doc_response.content).hexdigest()
-                            except:
-                                content_hash = hashlib.sha256(file_url.encode()).hexdigest()
-                            
-                            cursor.execute(
-                                f"SELECT id, content_hash FROM {schema}.documents WHERE url = %s",
-                                (file_url,)
-                            )
-                            existing = cursor.fetchone()
-                            
-                            if existing:
-                                if existing['content_hash'] != content_hash:
+                                title_elem = item.find('a', class_='docs__title')
+                                if not title_elem:
+                                    continue
+                                
+                                title = title_elem.get_text(strip=True)
+                                doc_page_url = urljoin(section_url, title_elem.get('href', ''))
+                                
+                                inner_title_elem = item.find('div', class_='docs__inner-title')
+                                if inner_title_elem:
+                                    full_title = f"{title}: {inner_title_elem.get_text(strip=True)}"
+                                else:
+                                    full_title = title
+                                
+                                date_elem = item.find('div', class_='docs__date')
+                                pub_date = None
+                                if date_elem:
+                                    date_text = date_elem.get_text(strip=True)
+                                    try:
+                                        pub_date = datetime.strptime(date_text.split()[0], '%d.%m.%Y').date()
+                                    except:
+                                        pub_date = None
+                                
+                                file_link_elem = item.find('a', class_='docs__file-link')
+                                if file_link_elem:
+                                    file_url = urljoin(base_url, file_link_elem.get('href', ''))
+                                else:
+                                    file_url = doc_page_url
+                                
+                                try:
+                                    doc_response = requests.get(file_url, timeout=15)
+                                    content_hash = hashlib.sha256(doc_response.content).hexdigest()
+                                except:
+                                    content_hash = hashlib.sha256(file_url.encode()).hexdigest()
+                                
+                                cursor.execute(
+                                    f"SELECT id, content_hash FROM {schema}.documents WHERE url = %s",
+                                    (file_url,)
+                                )
+                                existing = cursor.fetchone()
+                                
+                                if existing:
+                                    if existing['content_hash'] != content_hash:
+                                        cursor.execute(
+                                            f"""UPDATE {schema}.documents 
+                                               SET content_hash = %s, title = %s, updated_at = CURRENT_TIMESTAMP, 
+                                                   last_checked_at = CURRENT_TIMESTAMP
+                                               WHERE id = %s""",
+                                            (content_hash, full_title, existing['id'])
+                                        )
+                                        
+                                        cursor.execute(
+                                            f"""INSERT INTO {schema}.document_changes 
+                                               (document_id, change_type, old_content_hash, new_content_hash)
+                                               VALUES (%s, 'modified', %s, %s)""",
+                                            (existing['id'], existing['content_hash'], content_hash)
+                                        )
+                                        section_stats['updated'] += 1
+                                    else:
+                                        cursor.execute(
+                                            f"UPDATE {schema}.documents SET last_checked_at = CURRENT_TIMESTAMP WHERE id = %s",
+                                            (existing['id'],)
+                                        )
+                                else:
                                     cursor.execute(
-                                        f"""UPDATE {schema}.documents 
-                                           SET content_hash = %s, title = %s, updated_at = CURRENT_TIMESTAMP, 
-                                               last_checked_at = CURRENT_TIMESTAMP
-                                           WHERE id = %s""",
-                                        (content_hash, full_title, existing['id'])
+                                        f"""INSERT INTO {schema}.documents 
+                                           (title, url, section, published_date, content_hash)
+                                           VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                                        (full_title, file_url, section_names[section], pub_date, content_hash)
                                     )
+                                    doc_id = cursor.fetchone()['id']
                                     
                                     cursor.execute(
                                         f"""INSERT INTO {schema}.document_changes 
-                                           (document_id, change_type, old_content_hash, new_content_hash)
-                                           VALUES (%s, 'modified', %s, %s)""",
-                                        (existing['id'], existing['content_hash'], content_hash)
+                                           (document_id, change_type, new_content_hash)
+                                           VALUES (%s, 'new', %s)""",
+                                        (doc_id, content_hash)
                                     )
-                                    section_stats['updated'] += 1
-                                else:
-                                    cursor.execute(
-                                        f"UPDATE {schema}.documents SET last_checked_at = CURRENT_TIMESTAMP WHERE id = %s",
-                                        (existing['id'],)
-                                    )
-                            else:
-                                cursor.execute(
-                                    f"""INSERT INTO {schema}.documents 
-                                       (title, url, section, published_date, content_hash)
-                                       VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-                                    (full_title, file_url, section_names[section], pub_date, content_hash)
-                                )
-                                doc_id = cursor.fetchone()['id']
+                                    section_stats['new'] += 1
                                 
-                                cursor.execute(
-                                    f"""INSERT INTO {schema}.document_changes 
-                                       (document_id, change_type, new_content_hash)
-                                       VALUES (%s, 'new', %s)""",
-                                    (doc_id, content_hash)
-                                )
-                                section_stats['new'] += 1
-                            
-                            stats['total_processed'] += 1
-                            
-                        except Exception as e:
-                            section_stats['errors'] += 1
-                            continue
+                                stats['total_processed'] += 1
+                                
+                            except Exception as e:
+                                section_stats['errors'] += 1
+                                continue
+                        
+                        if not has_next_page:
+                            break
+                        
+                        page += 1
                 
-                except Exception as e:
-                    continue
+                    except Exception as e:
+                        break
             
             duration_ms = int((time.time() - start_time) * 1000)
             message = f"Парсинг завершён. Новых: {section_stats['new']}, изменённых: {section_stats['updated']}, ошибок: {section_stats['errors']}"
