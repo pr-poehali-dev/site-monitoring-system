@@ -311,6 +311,7 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         max_execution_time = 25
         
         empty_pages_count = 0  # Счётчик пустых страниц подряд
+        year_fully_completed = False  # Флаг: год завершён полностью (все данные загружены)
         
         while page <= MAX_PAGES_PER_RUN and stats['docs_processed'] < MAX_DOCS_PER_RUN:
             # Проверяем время выполнения перед обработкой страницы
@@ -357,6 +358,7 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                 log_create(cursor, schema, section, 'warning', 
                     f'⚠️ Код {resp.status_code} на странице {page}, завершаем год')
                 conn.commit()
+                year_fully_completed = True  # 404/ошибка = конец данных
                 break
             
             soup = BeautifulSoup(resp.text, 'html.parser')
@@ -374,6 +376,7 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                         log_create(cursor, schema, section, 'info', 
                             f'⚠️ Редирект на главную архива (страница {page}), документы закончились')
                         conn.commit()
+                        year_fully_completed = True  # Редирект = конец данных
                         break
                 
                 # Проверяем старый табличный формат (2009-2015)
@@ -400,6 +403,7 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                     log_create(cursor, schema, section, 'info', 
                         f'✅ Данных больше нет ({EMPTY_PAGES_THRESHOLD} пустых страниц подряд), год завершен')
                     conn.commit()
+                    year_fully_completed = True  # 3 пустые = конец данных
                     break
                 
                 # Пробуем следующую страницу (возможно пропуск в нумерации)
@@ -466,13 +470,14 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
                     has_next = True
             
             if not has_next:
+                year_fully_completed = True  # Нет кнопки "Далее" = конец данных
                 break
             
             page += 1
         
         # Проверяем: завершён ли год ПОЛНОСТЬЮ или по таймауту/лимиту
         dur = int((time.time() - t1) * 1000)
-        is_fully_completed = (empty_pages_count >= EMPTY_PAGES_THRESHOLD) or (page > MAX_PAGES_PER_RUN)
+        is_fully_completed = year_fully_completed  # Используем флаг, установленный в цикле
         
         if is_fully_completed:
             # ВСЕ данные загружены — финальный статус 'completed'
@@ -540,7 +545,14 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         }
         
     except Exception as e:
+        # Безопасная обработка stats (может не быть инициализирована при ошибке)
+        if 'stats' not in locals():
+            stats = {'docs_processed': 0, 'new': 0, 'upd': 0, 'skip': 0, 'errors': 0}
         stats['errors'] += 1
+        
+        # Безопасная обработка retry_count
+        if 'retry_count' not in locals() or 'state' not in locals():
+            retry_count = 0
         new_retry = retry_count + 1
         
         error_msg = f'💥 КРИТИЧЕСКАЯ ОШИБКА parse_single_year ({section}, {year}):\n{str(e)[:500]}'
