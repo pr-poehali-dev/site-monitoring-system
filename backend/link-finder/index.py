@@ -157,11 +157,15 @@ def handler(event: dict, context) -> dict:
         if batch_mode:
             cursor.execute(f"""
                 SELECT id, document_number, document_date, file_cdn_url, title, section
-                FROM {schema}.documents
+                FROM {schema}.documents d
                 WHERE file_cdn_url IS NOT NULL
                   AND related_to IS NULL
                   AND related_count = 0
                   AND is_phantom = FALSE
+                  AND NOT EXISTS (
+                      SELECT 1 FROM {schema}.link_finding_logs lfl 
+                      WHERE lfl.document_id = d.id
+                  )
                 ORDER BY 
                     COALESCE(document_date, published_date, created_at) DESC,
                     id DESC

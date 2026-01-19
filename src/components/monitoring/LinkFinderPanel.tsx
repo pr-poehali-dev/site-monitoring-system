@@ -38,7 +38,7 @@ const LinkFinderPanel = () => {
       const response = await fetch(`${API_URL}?endpoint=stats`);
       const data = await response.json();
       console.log('Stats response:', data);
-      return data.total_without_relations || 0;
+      return data.unprocessed_for_links || 0;
     } catch (error) {
       console.error('Error getting total:', error);
       return 0;

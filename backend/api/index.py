@@ -319,11 +319,26 @@ def get_stats(cursor, schema: str) -> dict:
     """)
     total_without_relations = cursor.fetchone()['total']
     
+    cursor.execute(f"""
+        SELECT COUNT(*) as total 
+        FROM {schema}.documents d
+        WHERE file_cdn_url IS NOT NULL
+          AND related_to IS NULL
+          AND related_count = 0
+          AND is_phantom = FALSE
+          AND NOT EXISTS (
+              SELECT 1 FROM {schema}.link_finding_logs lfl 
+              WHERE lfl.document_id = d.id
+          )
+    """)
+    unprocessed_for_links = cursor.fetchone()['total']
+    
     return {
         'total_documents': total_docs,
         'changes_this_week': changes_week,
         'active_sections': active_sections,
-        'total_without_relations': total_without_relations
+        'total_without_relations': total_without_relations,
+        'unprocessed_for_links': unprocessed_for_links
     }
 
 
