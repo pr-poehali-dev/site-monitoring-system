@@ -226,5 +226,23 @@ export const apiClient = {
     const response = await fetch(`${API_BASE_URL}?${queryParams}`);
     if (!response.ok) throw new Error('Failed to fetch related documents');
     return response.json();
+  },
+
+  async getLinkFindingLogs(params?: {
+    session_id?: string;
+    search?: string;
+    status?: string;
+    step?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const queryParams = new URLSearchParams({
+      endpoint: 'link_finding_logs',
+      ...params
+    } as Record<string, string>);
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`);
+    if (!response.ok) throw new Error('Failed to fetch link finding logs');
+    return response.json();
   }
 };

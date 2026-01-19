@@ -279,30 +279,70 @@ def get_logs(cursor, schema: str, params: dict) -> dict:
 
 
 def get_link_finding_logs(cursor, schema: str, params: dict) -> dict:
-    """Получение логов поиска связей"""
-    limit = int(params.get('limit', '100'))
+    """Получение детальных логов поиска связей с фильтрацией и поиском"""
+    limit = int(params.get('limit', '50'))
+    offset = int(params.get('offset', '0'))
+    session_id = params.get('session_id', '')
+    search = params.get('search', '')
+    status_filter = params.get('status', '')
+    step_filter = params.get('step', '')
+    
+    where_clauses = []
+    query_params = []
+    
+    if session_id:
+        where_clauses.append(f"lfl.session_id::text = %s")
+        query_params.append(session_id)
+    
+    if search:
+        where_clauses.append(f"(lfl.document_number LIKE %s OR lfl.details::text ILIKE %s)")
+        search_pattern = f'%{search}%'
+        query_params.extend([search_pattern, search_pattern])
+    
+    if status_filter:
+        where_clauses.append(f"lfl.status = %s")
+        query_params.append(status_filter)
+    
+    if step_filter:
+        where_clauses.append(f"lfl.step = %s")
+        query_params.append(step_filter)
+    
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     
     cursor.execute(f"""
         SELECT 
             lfl.id,
+            lfl.session_id,
             lfl.document_id,
             lfl.document_number,
+            lfl.document_date,
+            lfl.step,
             lfl.status,
-            lfl.references_found,
-            lfl.links_created,
-            lfl.not_found_refs,
-            lfl.message,
+            lfl.details,
             lfl.created_at,
             d.title as document_title
         FROM {schema}.link_finding_logs lfl
         LEFT JOIN {schema}.documents d ON lfl.document_id = d.id
+        {where_sql}
         ORDER BY lfl.created_at DESC
-        LIMIT %s
-    """, (limit,))
+        LIMIT %s OFFSET %s
+    """, (*query_params, limit, offset))
     
     logs = cursor.fetchall()
     
-    return {'logs': logs}
+    cursor.execute(f"""
+        SELECT COUNT(*) as total
+        FROM {schema}.link_finding_logs lfl
+        {where_sql}
+    """, tuple(query_params))
+    total = cursor.fetchone()['total']
+    
+    return {
+        'logs': logs,
+        'total': total,
+        'limit': limit,
+        'offset': offset
+    }
 
 
 def get_settings(cursor, schema: str) -> dict:

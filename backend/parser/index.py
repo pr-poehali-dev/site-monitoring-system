@@ -38,6 +38,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import boto3
 
+from link_finder import find_all_relations
+
 MAX_RETRY = 3
 MAX_DOCS_PER_RUN = 200
 MAX_PAGES_PER_RUN = 50
@@ -128,7 +130,8 @@ def handler(event: dict, context) -> dict:
                 return success_response(result)
             
             elif action == 'find_relations':
-                result = find_document_relations(conn, schema)
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+                result = find_all_relations(cursor, conn, schema)
                 conn.commit()
                 conn.close()
                 return success_response(result)
@@ -1451,7 +1454,7 @@ def log_update(cursor, schema: str, lid: int, status: str, message: str, dur: in
     )
 
 
-def find_document_relations(conn, schema: str) -> dict:
+def cors_response():
     """Поиск связей между документами через анализ файлов (полная логика из link-finder)"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     

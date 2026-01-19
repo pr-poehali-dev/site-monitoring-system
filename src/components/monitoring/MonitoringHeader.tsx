@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
+import { useNavigate } from 'react-router-dom';
 
 interface MonitoringHeaderProps {
   stats: {
@@ -11,6 +13,8 @@ interface MonitoringHeaderProps {
 }
 
 const MonitoringHeader = ({ stats }: MonitoringHeaderProps) => {
+  const navigate = useNavigate();
+  
   return (
     <Card className="mb-6">
       <CardHeader>
@@ -39,6 +43,14 @@ const MonitoringHeader = ({ stats }: MonitoringHeaderProps) => {
               <div className="text-2xl font-bold text-orange-600">{stats.active_sections}</div>
               <div className="text-xs text-gray-500">Разделов</div>
             </div>
+            <Button
+              variant="outline"
+              onClick={() => navigate('/link-finder')}
+              className="ml-4"
+            >
+              <Icon name="Link" size={16} />
+              Поиск связей
+            </Button>
           </div>
         </div>
       </CardHeader>
