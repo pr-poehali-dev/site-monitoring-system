@@ -156,19 +156,24 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
     
     where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
     
-    allowed_sorts = ['created_at', 'document_date', 'published_date', 'title', 'changes_count', 'file_size', 'related_count']
+    allowed_sorts = ['created_at', 'document_date', 'published_date', 'title', 'changes_count', 'file_size', 'related_count', 'total_versions']
     if sort_by not in allowed_sorts:
         sort_by = 'created_at'
     if sort_order.upper() not in ['ASC', 'DESC']:
         sort_order = 'DESC'
     
-    order_sql = f"ORDER BY {sort_by} {sort_order} NULLS LAST"
+    # Для сортировки по related_count используем total_versions (сумма related_count + prev_versions_count)
+    if sort_by == 'related_count':
+        order_sql = f"ORDER BY (d.related_count + (SELECT COUNT(*) FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id)) {sort_order} NULLS LAST"
+    else:
+        order_sql = f"ORDER BY {sort_by} {sort_order} NULLS LAST"
     
     cursor.execute(f"""
         SELECT d.id, d.title, d.url, d.section, d.published_date, d.document_date, d.document_number, 
                d.file_size, d.file_cdn_url, d.changes_count, d.last_checked_at, d.created_at,
                d.related_to, d.is_actual, d.related_count, d.is_phantom, d.phantom_source_id,
-               (SELECT COUNT(*) FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id) as prev_versions_count
+               (SELECT COUNT(*) FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id) as prev_versions_count,
+               (d.related_count + (SELECT COUNT(*) FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id)) as total_versions
         FROM {schema}.documents d
         WHERE {where_sql}
         {order_sql}

@@ -49,6 +49,14 @@ def parse_document_references(text: str) -> list:
     '''
     references = []
     
+    # Список фраз-исключений, указывающих что это НЕ тот же уровень власти
+    exclusion_phrases = [
+        r'правительств[ао]\s+смоленской\s+области',
+        r'администраци[ия]\s+смоленской\s+области',
+        r'правительств[ао]\s+российской\s+федерации',
+        r'правительств[ао]\s+рф',
+    ]
+    
     # Ключевые фразы, указывающие на связь с предыдущей версией
     context_keywords = [
         r'утратившим\s+силу',
@@ -84,6 +92,15 @@ def parse_document_references(text: str) -> list:
                 start_pos = max(0, keyword_match.start() - 200)
                 end_pos = min(len(text), keyword_match.end() + 300)
             context_text = text[start_pos:end_pos]
+            
+            # Пропускаем контекст если он относится к другому уровню власти
+            skip_context = False
+            for exclusion in exclusion_phrases:
+                if re.search(exclusion, context_text, re.IGNORECASE):
+                    skip_context = True
+                    break
+            if skip_context:
+                continue
             
             # В этом контексте ищем все упоминания документов
             

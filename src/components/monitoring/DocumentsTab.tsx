@@ -212,30 +212,17 @@ const DocumentsTab = ({
                     )}
                   </TableCell>
                   <TableCell className="text-center">
-                    {doc.related_count > 0 ? (
+                    {doc.total_versions > 0 ? (
                       <a 
                         href={`/versions/${doc.id}`}
                         className="inline-block"
-                        title={`${doc.related_count} версий документа`}
+                        title={`${doc.total_versions} версий документа (${doc.related_count} новых, ${doc.prev_versions_count} старых)`}
                       >
                         <Badge 
-                          variant="default"
-                          className="text-xs cursor-pointer hover:bg-primary/80 transition-colors"
+                          variant={doc.related_count > 0 ? "default" : "secondary"}
+                          className="text-xs cursor-pointer hover:opacity-80 transition-colors"
                         >
-                          {doc.related_count}
-                        </Badge>
-                      </a>
-                    ) : doc.prev_versions_count > 0 ? (
-                      <a 
-                        href={`/versions/${doc.id}`}
-                        className="inline-block"
-                        title={`${doc.prev_versions_count} предыдущих версий`}
-                      >
-                        <Badge 
-                          variant="secondary"
-                          className="text-xs cursor-pointer hover:bg-secondary/80 transition-colors"
-                        >
-                          {doc.prev_versions_count}
+                          {doc.total_versions}
                         </Badge>
                       </a>
                     ) : (
