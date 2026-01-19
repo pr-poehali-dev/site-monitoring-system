@@ -1,23 +1,25 @@
 import { useState, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { API_BASE_URL } from '@/config/api';
 import Icon from '@/components/ui/icon';
 
+const API_BASE_URL = 'https://functions.poehali.dev/73bc5c25-0ee1-409f-89c6-2cf97269ec2d';
+
 interface LinkFinderLogsProps {
-  sessionId: string | null;
-  autoRefresh: boolean;
-  onLogUpdate?: (log: any) => void;
+  sessionId?: string | null;
+  autoRefresh?: boolean;
 }
 
-export function LinkFinderLogs({ sessionId, autoRefresh, onLogUpdate }: LinkFinderLogsProps) {
+export function LinkFinderLogs({ sessionId, autoRefresh = false }: LinkFinderLogsProps) {
   const [logs, setLogs] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const [loading, setLoading] = useState(false);
+
   const limit = 50;
 
   const fetchLogs = async () => {
@@ -26,31 +28,28 @@ export function LinkFinderLogs({ sessionId, autoRefresh, onLogUpdate }: LinkFind
       const params = new URLSearchParams({
         endpoint: 'link_finding_logs',
         limit: limit.toString(),
-        offset: (page * limit).toString(),
+        offset: ((page - 1) * limit).toString(),
         ...(sessionId && { session_id: sessionId }),
-        ...(search && { search }),
-        ...(statusFilter && { status: statusFilter })
+        ...(searchQuery && { search: searchQuery }),
+        ...(filterStatus && { status: filterStatus })
       });
 
       const response = await fetch(`${API_BASE_URL}?${params}`);
       const data = await response.json();
 
-      setLogs(data.logs || []);
-      setTotal(data.total || 0);
-
-      if (data.logs && data.logs.length > 0 && onLogUpdate) {
-        onLogUpdate(data.logs[0]);
+      if (data.logs) {
+        setLogs(data.logs);
+        setTotal(data.total);
       }
     } catch (error) {
       console.error('Ошибка загрузки логов:', error);
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   useEffect(() => {
     fetchLogs();
-  }, [sessionId, page, search, statusFilter]);
+  }, [page, searchQuery, filterStatus, sessionId]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -60,293 +59,339 @@ export function LinkFinderLogs({ sessionId, autoRefresh, onLogUpdate }: LinkFind
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, sessionId, page, search, statusFilter]);
-
-  const getStepIcon = (step: string) => {
-    const icons: Record<string, string> = {
-      'session_start': 'Play',
-      'file_download': 'Download',
-      'file_parse': 'FileText',
-      'pattern_search': 'Search',
-      'link_create': 'Link',
-      'link_skip': 'SkipForward',
-      'link_delete': 'Trash2',
-      'phantom_create': 'Ghost',
-      'document_completed': 'CheckCircle',
-      'session_completed': 'Trophy',
-      'error': 'AlertCircle'
-    };
-    return icons[step] || 'Circle';
-  };
-
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      'success': 'text-green-600 bg-green-50',
-      'info': 'text-blue-600 bg-blue-50',
-      'warning': 'text-yellow-600 bg-yellow-50',
-      'error': 'text-red-600 bg-red-50'
-    };
-    return colors[status] || 'text-gray-600 bg-gray-50';
-  };
-
-  const formatDetails = (step: string, details: any) => {
-    if (!details) return null;
-
-    if (step === 'file_download') {
-      return (
-        <div className="text-xs space-y-1">
-          <p>Размер: {details.size_kb} КБ</p>
-          <p>Время: {details.duration_ms}мс</p>
-          {details.error && <p className="text-red-600">Ошибка: {details.error}</p>}
-        </div>
-      );
-    }
-
-    if (step === 'file_parse') {
-      return (
-        <div className="text-xs space-y-1">
-          <p>Формат: {details.format}</p>
-          <p>Параграфов: {details.paragraphs}</p>
-          <p>Символов: {details.text_length}</p>
-          <p>Время: {details.duration_ms}мс</p>
-        </div>
-      );
-    }
-
-    if (step === 'pattern_search') {
-      return (
-        <div className="text-xs space-y-2">
-          {details.version_keywords_found && details.version_keywords_found.length > 0 && (
-            <div>
-              <p className="font-semibold text-purple-700">VERSION паттерны:</p>
-              <p className="text-purple-600">{details.version_keywords_found.join(', ')}</p>
-            </div>
-          )}
-          {details.related_keywords_found && details.related_keywords_found.length > 0 && (
-            <div>
-              <p className="font-semibold text-blue-700">RELATED паттерны:</p>
-              <p className="text-blue-600">{details.related_keywords_found.join(', ')}</p>
-            </div>
-          )}
-          {details.mentions && details.mentions.length > 0 && (
-            <div>
-              <p className="font-semibold">Упоминания ({details.mentions.length}):</p>
-              {details.mentions.slice(0, 5).map((m: any, i: number) => (
-                <div key={i} className="pl-2 border-l-2 border-gray-300 mt-1">
-                  <p>№{m.number} от {m.date}</p>
-                  <p className="text-gray-600 italic">Тип: {m.type}</p>
-                  <p className="text-gray-500 text-xs">{m.context?.slice(0, 100)}...</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    if (step === 'link_create') {
-      return (
-        <div className="text-xs space-y-1">
-          <p className="font-semibold text-green-700">Создана связь {details.link_type}</p>
-          <p>№{details.target_number} от {details.target_date}</p>
-          <p className="text-gray-600">Паттерн: {details.pattern}</p>
-          <p className="text-gray-600">Ключевые слова: {details.keywords?.join(', ')}</p>
-          <p className="text-gray-500 italic text-xs">{details.context?.slice(0, 150)}...</p>
-        </div>
-      );
-    }
-
-    if (step === 'link_skip') {
-      return (
-        <div className="text-xs space-y-1">
-          <p>№{details.target_number} от {details.target_date}</p>
-          <p className="text-yellow-700">Причина: {details.reason}</p>
-          {details.existing_link_id && (
-            <p className="text-gray-600">Связь уже существует (ID: {details.existing_link_id})</p>
-          )}
-          {details.exclusion_phrase && (
-            <p className="text-gray-600">Внешний документ: {details.exclusion_phrase}</p>
-          )}
-        </div>
-      );
-    }
-
-    if (step === 'link_delete') {
-      return (
-        <div className="text-xs space-y-1">
-          <p className="font-semibold text-red-700">Удалена связь {details.link_type}</p>
-          <p>№{details.target_number} от {details.target_date}</p>
-          <p className="text-gray-600">Причина: {details.reason}</p>
-          <p className="text-gray-500">Оригинал создан: {details.original_created_at}</p>
-        </div>
-      );
-    }
-
-    if (step === 'phantom_create') {
-      return (
-        <div className="text-xs space-y-1">
-          <p className="font-semibold text-purple-700">Фантом создан</p>
-          <p>№{details.phantom_number} от {details.phantom_date}</p>
-          <p className="text-gray-600">ID: {details.phantom_id}</p>
-        </div>
-      );
-    }
-
-    if (step === 'document_completed') {
-      const s = details.stats || {};
-      return (
-        <div className="text-xs space-y-1 font-semibold">
-          <p className="text-green-700">✅ Время: {details.total_duration_ms}мс</p>
-          <p>Связей создано: {s.links_created || 0}</p>
-          <p>Связей пропущено: {s.links_skipped || 0}</p>
-          <p>Связей удалено: {s.links_deleted || 0}</p>
-          <p>Фантомов создано: {s.phantoms_created || 0}</p>
-          {s.errors > 0 && <p className="text-red-600">Ошибок: {s.errors}</p>}
-        </div>
-      );
-    }
-
-    return (
-      <pre className="text-xs bg-gray-100 p-2 rounded overflow-auto max-h-40">
-        {JSON.stringify(details, null, 2)}
-      </pre>
-    );
-  };
+  }, [autoRefresh, page, searchQuery, filterStatus, sessionId]);
 
   const totalPages = Math.ceil(total / limit);
 
-  return (
-    <Card className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <Icon name="FileText" size={24} />
-          Детальные логи обработки
-        </h2>
-        <div className="flex items-center gap-2">
-          {autoRefresh && (
-            <div className="flex items-center gap-2 text-sm text-green-600">
-              <Icon name="RefreshCw" size={16} className="animate-spin" />
-              Авто-обновление
-            </div>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchLogs}
-            disabled={loading}
-          >
-            <Icon name="RefreshCw" size={16} />
-            Обновить
-          </Button>
-        </div>
-      </div>
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, { color: string; icon: string }> = {
+      success: { color: 'bg-green-100 text-green-800 border-green-200', icon: 'CheckCircle2' },
+      info: { color: 'bg-blue-100 text-blue-800 border-blue-200', icon: 'Info' },
+      warning: { color: 'bg-orange-100 text-orange-800 border-orange-200', icon: 'AlertTriangle' },
+      error: { color: 'bg-red-100 text-red-800 border-red-200', icon: 'XCircle' }
+    };
 
-      {/* Фильтры */}
-      <div className="flex gap-2">
-        <Input
-          placeholder="Поиск по номеру документа..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-sm"
-        />
-        <Button
-          variant={statusFilter === '' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setStatusFilter('')}
-        >
-          Все ({total})
-        </Button>
-        <Button
-          variant={statusFilter === 'success' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setStatusFilter('success')}
-        >
-          Успешные
-        </Button>
-        <Button
-          variant={statusFilter === 'warning' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setStatusFilter('warning')}
-        >
-          Предупреждения
-        </Button>
-        <Button
-          variant={statusFilter === 'error' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setStatusFilter('error')}
-        >
-          Ошибки
-        </Button>
-      </div>
+    const variant = variants[status] || variants.info;
 
-      {/* Логи */}
-      <div className="space-y-3 max-h-[600px] overflow-y-auto">
-        {logs.length === 0 && (
-          <div className="text-center py-8 text-muted-foreground">
-            {loading ? 'Загрузка логов...' : 'Логов пока нет'}
+    return (
+      <Badge className={`${variant.color} border`}>
+        <Icon name={variant.icon as any} size={14} className="mr-1" />
+        {status}
+      </Badge>
+    );
+  };
+
+  const renderLogDetails = (log: any) => {
+    const details = log.details;
+
+    // СИСТЕМНЫЕ ЛОГИ (старт, итерации, завершение)
+    if (log.step === 'system_start') {
+      return (
+        <div className="space-y-2 text-sm">
+          <div className="font-semibold text-blue-900">🚀 Запуск поиска связей</div>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div><span className="text-muted-foreground">Всего документов:</span> <span className="font-medium">{details.total_documents}</span></div>
+            <div><span className="text-muted-foreground">Уже обработано:</span> <span className="font-medium">{details.already_processed}</span></div>
+            <div><span className="text-muted-foreground">Осталось:</span> <span className="font-medium">{details.remaining}</span></div>
           </div>
-        )}
+          {details.auto_loop && (
+            <div className="text-xs text-blue-600">🔄 Режим auto-loop активирован</div>
+          )}
+        </div>
+      );
+    }
 
-        {logs.map((log) => (
-          <div
-            key={log.id}
-            className={`p-4 rounded-lg border ${getStatusColor(log.status)}`}
-          >
-            <div className="flex items-start gap-3">
-              <Icon name={getStepIcon(log.step)} size={20} className="mt-0.5" />
-              <div className="flex-1 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold">
-                      {log.document_number ? `№${log.document_number}` : 'Система'}
-                      {log.document_date && ` от ${log.document_date}`}
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      {log.step} • {new Date(log.created_at).toLocaleString('ru-RU')}
-                    </p>
-                  </div>
-                  <span className={`px-2 py-1 rounded text-xs font-semibold ${getStatusColor(log.status)}`}>
-                    {log.status}
+    if (log.step === 'system_iteration') {
+      return (
+        <div className="space-y-1 text-sm">
+          <div className="font-semibold text-blue-900">🔄 Итерация {details.iteration}</div>
+          <div className="text-xs text-muted-foreground">Осталось документов: {details.remaining}</div>
+        </div>
+      );
+    }
+
+    if (log.step === 'system_iteration_completed') {
+      return (
+        <div className="space-y-2 text-sm">
+          <div className="font-semibold text-green-900">✅ Итерация {details.iteration} завершена</div>
+          <div className="grid grid-cols-4 gap-2 text-xs">
+            <div><span className="text-muted-foreground">Обработано:</span> <span className="font-medium">{details.stats.total_processed}/{details.batch_size}</span></div>
+            <div><span className="text-muted-foreground">Версий:</span> <span className="font-medium">{details.stats.version_mentions}</span></div>
+            <div><span className="text-muted-foreground">Связей:</span> <span className="font-medium">{details.stats.links_created}</span></div>
+            <div><span className="text-muted-foreground">Осталось:</span> <span className="font-medium">{details.remaining}</span></div>
+          </div>
+          <div className="text-xs text-muted-foreground">Время: {details.duration_ms}мс</div>
+        </div>
+      );
+    }
+
+    if (log.step === 'system_completed') {
+      return (
+        <div className="space-y-1 text-sm">
+          <div className="font-semibold text-green-900">🎉 Поиск связей полностью завершён!</div>
+          <div className="text-xs text-muted-foreground">
+            Обработано: {details.total_documents} документов за {details.total_iterations} итераций
+          </div>
+        </div>
+      );
+    }
+
+    // ЛОГИ ПО ФАЙЛАМ (file_processing)
+    if (log.step === 'file_processing') {
+      return (
+        <div className="space-y-3 text-sm bg-gray-50 rounded-lg p-4">
+          {/* Заголовок файла */}
+          <div className="flex items-center justify-between pb-2 border-b">
+            <div className="font-semibold">
+              📄 Документ №{details.document_number} от {details.document_date}
+            </div>
+            <div className="text-xs text-muted-foreground">{details.total_duration_ms}мс</div>
+          </div>
+
+          {/* Этапы обработки */}
+          <div className="space-y-2">
+            {/* Скачивание */}
+            {details.stages.download && (
+              <div className="flex items-center gap-2 text-xs">
+                {details.stages.download.status === 'success' ? (
+                  <Icon name="Download" size={14} className="text-green-600" />
+                ) : (
+                  <Icon name="XCircle" size={14} className="text-red-600" />
+                )}
+                <span className="font-medium">Скачивание:</span>
+                {details.stages.download.status === 'success' ? (
+                  <span className="text-muted-foreground">
+                    {details.stages.download.size_kb} КБ за {details.stages.download.duration_ms}мс
                   </span>
+                ) : (
+                  <span className="text-red-600">{details.stages.download.error}</span>
+                )}
+              </div>
+            )}
+
+            {/* Парсинг */}
+            {details.stages.parse && (
+              <div className="flex items-center gap-2 text-xs">
+                {details.stages.parse.status === 'success' ? (
+                  <Icon name="FileText" size={14} className="text-green-600" />
+                ) : (
+                  <Icon name="XCircle" size={14} className="text-red-600" />
+                )}
+                <span className="font-medium">Парсинг ({details.stages.parse.format}):</span>
+                {details.stages.parse.status === 'success' ? (
+                  <span className="text-muted-foreground">
+                    {details.stages.parse.text_length} символов за {details.stages.parse.duration_ms}мс
+                  </span>
+                ) : (
+                  <span className="text-red-600">{details.stages.parse.error}</span>
+                )}
+              </div>
+            )}
+
+            {/* Упоминания */}
+            {details.stages.mentions && (
+              <div className="flex items-center gap-2 text-xs">
+                <Icon name="Search" size={14} className="text-blue-600" />
+                <span className="font-medium">Найдено упоминаний:</span>
+                <span className="text-muted-foreground">
+                  {details.stages.mentions.total} (Версии: {details.stages.mentions.version_count}, Связанные: {details.stages.mentions.related_count})
+                </span>
+              </div>
+            )}
+
+            {/* Ключевые слова */}
+            {details.stages.mentions && (details.stages.mentions.version_keywords.length > 0 || details.stages.mentions.related_keywords.length > 0) && (
+              <div className="text-xs space-y-1">
+                {details.stages.mentions.version_keywords.length > 0 && (
+                  <div className="flex gap-1 flex-wrap">
+                    <span className="text-purple-700 font-medium">VERSION:</span>
+                    {details.stages.mentions.version_keywords.slice(0, 3).map((kw: string, i: number) => (
+                      <Badge key={i} variant="outline" className="text-xs bg-purple-50 text-purple-700">
+                        {kw.replace(/\\s\+/g, ' ').slice(0, 20)}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                {details.stages.mentions.related_keywords.length > 0 && (
+                  <div className="flex gap-1 flex-wrap">
+                    <span className="text-cyan-700 font-medium">RELATED:</span>
+                    {details.stages.mentions.related_keywords.slice(0, 3).map((kw: string, i: number) => (
+                      <Badge key={i} variant="outline" className="text-xs bg-cyan-50 text-cyan-700">
+                        {kw.replace(/\\s\+/g, ' ').slice(0, 20)}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Связи */}
+            {details.stages.links && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  <Icon name="Link" size={14} className="text-green-600" />
+                  <span className="font-medium">Результат:</span>
+                  <span className="text-green-600">Создано: {details.stages.links.created}</span>
+                  <span className="text-orange-600">Пропущено: {details.stages.links.skipped}</span>
+                  {details.stages.links.deleted.length > 0 && (
+                    <span className="text-red-600">Удалено: {details.stages.links.deleted.length}</span>
+                  )}
                 </div>
 
-                {log.document_title && (
-                  <p className="text-sm text-gray-700">{log.document_title}</p>
-                )}
-
-                {log.details && formatDetails(log.step, log.details)}
+                {/* Детали действий */}
+                {details.stages.links.actions.slice(0, 3).map((action: any, i: number) => (
+                  <div key={i} className="text-xs text-muted-foreground pl-6">
+                    {action.action === 'created' && (
+                      <span>✅ Создана связь {action.link_type} → №{action.target_number} от {action.target_date}</span>
+                    )}
+                    {action.action === 'skipped' && (
+                      <span>⏭ Пропущено: {action.reason === 'already_exists' ? 'уже существует' : action.reason}</span>
+                    )}
+                    {action.action === 'phantom_created' && (
+                      <span>👻 Создан фантом №{action.phantom_number}</span>
+                    )}
+                  </div>
+                ))}
               </div>
+            )}
+          </div>
+
+          {/* Финальная статистика */}
+          <div className="flex items-center justify-between pt-2 border-t text-xs">
+            <div className="flex gap-4">
+              <span>📎 Версий: {details.stats.version_mentions}</span>
+              <span>🔗 Связанных: {details.stats.related_mentions}</span>
+              <span>➕ Связей: {details.stats.links_created}</span>
+            </div>
+            {details.stats.errors > 0 && (
+              <span className="text-red-600">❌ Ошибок: {details.stats.errors}</span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Логи обработки</CardTitle>
+            <CardDescription>Подробная информация о каждом файле</CardDescription>
+          </div>
+          {autoRefresh && (
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              <span className="text-sm text-muted-foreground">Автообновление</span>
+            </div>
+          )}
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* Фильтры */}
+        <div className="flex gap-3">
+          <Input
+            placeholder="Поиск по номеру документа..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1"
+          />
+          <div className="flex gap-2">
+            <Button
+              variant={filterStatus === '' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilterStatus('')}
+            >
+              Все
+            </Button>
+            <Button
+              variant={filterStatus === 'success' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilterStatus('success')}
+            >
+              Успешно
+            </Button>
+            <Button
+              variant={filterStatus === 'warning' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilterStatus('warning')}
+            >
+              Предупреждения
+            </Button>
+            <Button
+              variant={filterStatus === 'error' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilterStatus('error')}
+            >
+              Ошибки
+            </Button>
+          </div>
+        </div>
+
+        {/* Логи */}
+        <div className="space-y-3">
+          {loading && logs.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Загрузка...
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Нет логов
+            </div>
+          ) : (
+            logs.map((log) => (
+              <div key={log.id} className="border rounded-lg p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {getStatusBadge(log.status)}
+                    {log.document_title && (
+                      <span className="text-sm font-medium">{log.document_title}</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {new Date(log.created_at).toLocaleString('ru-RU')}
+                  </div>
+                </div>
+                {renderLogDetails(log)}
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Пагинация */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-4 border-t">
+            <div className="text-sm text-muted-foreground">
+              Показано {(page - 1) * limit + 1}-{Math.min(page * limit, total)} из {total}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === 1}
+                onClick={() => setPage(page - 1)}
+              >
+                <Icon name="ChevronLeft" size={16} />
+              </Button>
+              <span className="flex items-center px-3 text-sm">
+                {page} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === totalPages}
+                onClick={() => setPage(page + 1)}
+              >
+                <Icon name="ChevronRight" size={16} />
+              </Button>
             </div>
           </div>
-        ))}
-      </div>
-
-      {/* Пагинация */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between pt-4 border-t">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(p => Math.max(0, p - 1))}
-            disabled={page === 0 || loading}
-          >
-            <Icon name="ChevronLeft" size={16} />
-            Назад
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Страница {page + 1} из {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
-            disabled={page >= totalPages - 1 || loading}
-          >
-            Вперёд
-            <Icon name="ChevronRight" size={16} />
-          </Button>
-        </div>
-      )}
+        )}
+      </CardContent>
     </Card>
   );
 }

@@ -53,14 +53,15 @@ except ImportError as e:
     LINK_IMPORT_ERROR = f"{str(e)}\n{traceback.format_exc()}"
 
 
-def find_all_relations(cursor, conn, schema: str) -> dict:
+def find_all_relations(cursor, conn, schema: str, auto_loop: bool = False, iteration: int = 1) -> dict:
     """Поиск связей между документами через анализ файлов"""
     import uuid
     from datetime import datetime
+    import requests
     
     # Проверяем доступность модулей
     if not LINK_MODULES_AVAILABLE:
-        log_create(cursor, schema, 'system', 'error', 
+        log_create(cursor, schema, 'link_finder', 'error', 
             f'❌ ОШИБКА ИМПОРТА МОДУЛЕЙ:\n{LINK_IMPORT_ERROR}')
         conn.commit()
         return {
@@ -71,7 +72,23 @@ def find_all_relations(cursor, conn, schema: str) -> dict:
     
     session_id = str(uuid.uuid4())
     
-    # Подсчет документов с файлами
+    # Подсчет УЖЕ обработанных документов (с хотя бы одной связью)
+    cursor.execute(f"""
+        SELECT COUNT(DISTINCT d.id) as processed
+        FROM {schema}.documents d
+        INNER JOIN {schema}.document_files df ON d.id = df.document_id
+        WHERE df.file_cdn_url IS NOT NULL 
+          AND df.file_cdn_url != ''
+          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
+          AND EXISTS (
+              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
+              UNION
+              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = d.id
+          )
+    """)
+    already_processed = cursor.fetchone()['processed']
+    
+    # Подсчет ВСЕХ документов с файлами
     cursor.execute(f"""
         SELECT COUNT(*) as total
         FROM {schema}.documents d
@@ -81,19 +98,53 @@ def find_all_relations(cursor, conn, schema: str) -> dict:
           AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
     """)
     total_documents = cursor.fetchone()['total']
+    remaining = total_documents - already_processed
     
-    link_log_step(cursor, schema, session_id, None, None, None,
-            'session_start', 'info', {
-                'total_documents': total_documents,
-                'started_at': datetime.now().isoformat()
-            })
+    # Логируем старт сессии (системный лог)
+    if iteration == 1:
+        link_log_step(cursor, schema, session_id, None, None, None,
+                'system_start', 'info', {
+                    'total_documents': total_documents,
+                    'already_processed': already_processed,
+                    'remaining': remaining,
+                    'started_at': datetime.now().isoformat(),
+                    'auto_loop': auto_loop
+                })
+        log_create(cursor, schema, 'link_finder', 'info', 
+            f'🚀 ПОИСК СВЯЗЕЙ ЗАПУЩЕН (итерация {iteration})\n'
+            f'📊 Всего документов: {total_documents}\n'
+            f'✅ Уже обработано: {already_processed}\n'
+            f'⏳ Осталось: {remaining}')
+    else:
+        link_log_step(cursor, schema, session_id, None, None, None,
+                'system_iteration', 'info', {
+                    'iteration': iteration,
+                    'remaining': remaining,
+                    'started_at': datetime.now().isoformat()
+                })
+        log_create(cursor, schema, 'link_finder', 'info', 
+            f'🔄 ИТЕРАЦИЯ {iteration}\n⏳ Осталось: {remaining} документов')
+    
     conn.commit()
     
-    log_create(cursor, schema, 'system', 'info', 
-        f'🔗 ПОИСК СВЯЗЕЙ ЗАПУЩЕН\n📊 Всего документов: {total_documents}')
-    conn.commit()
+    # Если все обработано - завершаем
+    if remaining == 0:
+        link_log_step(cursor, schema, session_id, None, None, None,
+                'system_completed', 'success', {
+                    'total_documents': total_documents,
+                    'completed_at': datetime.now().isoformat()
+                })
+        log_create(cursor, schema, 'link_finder', 'success', 
+            '🎉 ВСЕ ДОКУМЕНТЫ ОБРАБОТАНЫ!')
+        conn.commit()
+        return {
+            'status': 'all_completed',
+            'session_id': session_id,
+            'total_documents': total_documents,
+            'message': 'Все документы обработаны'
+        }
     
-    # Получаем первые 40 документов для обработки
+    # Получаем ЕЩЁ НЕ обработанные документы (без связей) - ПАКЕТ 40 шт
     cursor.execute(f"""
         SELECT d.id, d.document_number as number, d.document_date as date, 
                df.file_cdn_url as file_url,
@@ -106,10 +157,17 @@ def find_all_relations(cursor, conn, schema: str) -> dict:
         WHERE df.file_cdn_url IS NOT NULL 
           AND df.file_cdn_url != ''
           AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
+          AND NOT EXISTS (
+              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
+              UNION
+              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = d.id
+          )
         ORDER BY d.document_date DESC NULLS LAST
         LIMIT 40
     """)
     documents = cursor.fetchall()
+    
+    batch_size = len(documents)
     
     total_stats = {
         'total_processed': 0,
@@ -127,7 +185,7 @@ def find_all_relations(cursor, conn, schema: str) -> dict:
         # Проверка времени выполнения
         elapsed = time.time() - start_time
         if elapsed > max_duration:
-            log_create(cursor, schema, 'system', 'warning',
+            log_create(cursor, schema, 'link_finder', 'warning',
                 f'⏱ Достигнут лимит времени ({elapsed:.1f}с), обработано {total_stats["total_processed"]} документов')
             conn.commit()
             break
@@ -141,36 +199,84 @@ def find_all_relations(cursor, conn, schema: str) -> dict:
             total_stats['phantoms_created'] += doc_stats['phantoms_created']
             total_stats['errors'] += doc_stats['errors']
         except Exception as e:
-            log_create(cursor, schema, 'system', 'error',
+            log_create(cursor, schema, 'link_finder', 'error',
                 f'❌ Ошибка обработки документа {doc["id"]}: {str(e)[:300]}')
             conn.commit()
             total_stats['errors'] += 1
     
     duration_ms = int((time.time() - start_time) * 1000)
     
-    link_log_step(cursor, schema, session_id, None, None, None,
-            'session_completed', 'success', {
-                'duration_ms': duration_ms,
-                'stats': total_stats
-            })
-    conn.commit()
+    # Пересчитываем остаток после пакета
+    cursor.execute(f"""
+        SELECT COUNT(DISTINCT d.id) as remaining
+        FROM {schema}.documents d
+        INNER JOIN {schema}.document_files df ON d.id = df.document_id
+        WHERE df.file_cdn_url IS NOT NULL 
+          AND df.file_cdn_url != ''
+          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
+          AND NOT EXISTS (
+              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
+              UNION
+              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = d.id
+          )
+    """)
+    remaining_now = cursor.fetchone()['remaining']
     
-    log_create(cursor, schema, 'system', 'success',
-        f'✅ ПОИСК СВЯЗЕЙ ЗАВЕРШЁН\n'
-        f'📊 Обработано: {total_stats["total_processed"]}/{total_documents}\n'
+    # Логируем завершение итерации
+    link_log_step(cursor, schema, session_id, None, None, None,
+            'system_iteration_completed', 'success', {
+                'iteration': iteration,
+                'batch_size': batch_size,
+                'duration_ms': duration_ms,
+                'stats': total_stats,
+                'remaining': remaining_now
+            })
+    
+    log_create(cursor, schema, 'link_finder', 'success',
+        f'✅ ИТЕРАЦИЯ {iteration} ЗАВЕРШЕНА\n'
+        f'📦 Обработано в пакете: {total_stats["total_processed"]}/{batch_size}\n'
         f'📎 Версий: {total_stats["version_mentions"]}\n'
         f'🔗 Связанных: {total_stats["related_mentions"]}\n'
         f'➕ Создано связей: {total_stats["links_created"]}\n'
         f'👻 Фантомов: {total_stats["phantoms_created"]}\n'
+        f'⏳ Осталось: {remaining_now}\n'
         f'⏱ Время: {duration_ms}мс')
     conn.commit()
     
+    # Если есть ещё документы и включен auto_loop - запускаем следующую итерацию
+    if remaining_now > 0 and auto_loop:
+        try:
+            requests.post(
+                PARSER_BASE_URL,
+                json={'action': 'find_relations', 'auto_loop': True, 'iteration': iteration + 1},
+                timeout=2
+            )
+        except:
+            pass  # Fire-and-forget
+    
+    # Если все обработано - финальный лог
+    if remaining_now == 0:
+        link_log_step(cursor, schema, session_id, None, None, None,
+                'system_completed', 'success', {
+                    'total_documents': total_documents,
+                    'total_iterations': iteration,
+                    'completed_at': datetime.now().isoformat()
+                })
+        log_create(cursor, schema, 'link_finder', 'success', 
+            f'🎉 ПОИСК СВЯЗЕЙ ПОЛНОСТЬЮ ЗАВЕРШЁН!\n'
+            f'📊 Обработано документов: {total_documents}\n'
+            f'🔄 Итераций: {iteration}')
+        conn.commit()
+    
     return {
-        'status': 'completed',
+        'status': 'in_progress' if remaining_now > 0 else 'completed',
         'session_id': session_id,
+        'iteration': iteration,
         'total_documents': total_documents,
+        'remaining': remaining_now,
         **total_stats,
-        'duration_ms': duration_ms
+        'duration_ms': duration_ms,
+        'auto_loop': auto_loop
     }
 
 MAX_RETRY = 3
@@ -263,8 +369,10 @@ def handler(event: dict, context) -> dict:
                 return success_response(result)
             
             elif action == 'find_relations':
+                auto_loop = body.get('auto_loop', False)
+                iteration = body.get('iteration', 1)
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
-                result = find_all_relations(cursor, conn, schema)
+                result = find_all_relations(cursor, conn, schema, auto_loop, iteration)
                 conn.commit()
                 conn.close()
                 return success_response(result)

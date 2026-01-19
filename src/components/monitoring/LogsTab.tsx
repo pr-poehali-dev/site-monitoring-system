@@ -5,7 +5,6 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import Icon from '@/components/ui/icon';
-import LinkFindingLogs from './LinkFindingLogs';
 
 const PARSER_URL = 'https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c';
 
@@ -49,7 +48,6 @@ const LogsTab = ({ logs, autoRefreshLogs, setAutoRefreshLogs, formatDateTime }: 
 
   return (
     <div className="space-y-6">
-      <LinkFindingLogs />
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">

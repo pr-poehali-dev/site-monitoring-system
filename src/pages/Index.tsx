@@ -37,7 +37,7 @@ const Index = () => {
         <MonitoringHeader stats={state.stats} />
 
         <Tabs value={state.activeTab} onValueChange={state.setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="documents" className="gap-2">
               <Icon name="FileText" size={16} />
               Документы
@@ -49,6 +49,10 @@ const Index = () => {
             <TabsTrigger value="analytics" className="gap-2">
               <Icon name="BarChart3" size={16} />
               Аналитика
+            </TabsTrigger>
+            <TabsTrigger value="link-finder" className="gap-2" onClick={() => window.location.href = '/link-finder'}>
+              <Icon name="Link" size={16} />
+              Поиск связей
             </TabsTrigger>
             <TabsTrigger value="logs" className="gap-2">
               <Icon name="ScrollText" size={16} />

@@ -14,85 +14,23 @@ export default function LinkFinder() {
   
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
   const [stats, setStats] = useState({
     total_documents: 0,
-    total_processed: 0,
-    links_created: 0,
-    version_mentions: 0,
-    related_mentions: 0,
-    phantoms_created: 0,
-    errors: 0
+    remaining: 0,
+    iteration: 1
   });
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [lastLogTime, setLastLogTime] = useState<Date>(new Date());
-  const [retryAttempts, setRetryAttempts] = useState(0);
-  const [stuckWarning, setStuckWarning] = useState(false);
-
-  useEffect(() => {
-    if (!autoRefresh || !sessionId) return;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const timeSinceLastLog = (now.getTime() - lastLogTime.getTime()) / 1000;
-
-      if (timeSinceLastLog > 30 && isRunning && !stuckWarning) {
-        setStuckWarning(true);
-        toast({
-          title: '⚠️ Предупреждение',
-          description: `Нет новых логов ${Math.floor(timeSinceLastLog)} секунд. Попытка перезапуска...`,
-          variant: 'destructive'
-        });
-        handleRetry();
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [autoRefresh, sessionId, lastLogTime, isRunning, stuckWarning]);
-
-  const handleRetry = async () => {
-    if (retryAttempts >= 3) {
-      toast({
-        title: '❌ Критическая ошибка',
-        description: 'Не удалось перезапустить поиск связей после 3 попыток',
-        variant: 'destructive'
-      });
-      setIsRunning(false);
-      setAutoRefresh(false);
-      setStuckWarning(false);
-      return;
-    }
-
-    setRetryAttempts(prev => prev + 1);
-    toast({
-      title: '🔄 Перезапуск',
-      description: `Попытка ${retryAttempts + 1} из 3...`
-    });
-
-    setTimeout(() => {
-      handleStart();
-    }, 5000);
-  };
 
   const handleStart = async () => {
     setIsRunning(true);
-    setAutoRefresh(true);
-    setProgress(0);
-    setStats({
-      total_documents: 0,
-      total_processed: 0,
-      links_created: 0,
-      version_mentions: 0,
-      related_mentions: 0,
-      phantoms_created: 0,
-      errors: 0
-    });
-    setLastLogTime(new Date());
-    setRetryAttempts(0);
-    setStuckWarning(false);
-
+    
     try {
-      const result = await apiClient.findDocumentRelations();
+      const response = await fetch('https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'find_relations', auto_loop: true, iteration: 1 })
+      });
+      
+      const result = await response.json();
       
       if (result.session_id) {
         setSessionId(result.session_id);
@@ -100,21 +38,15 @@ export default function LinkFinder() {
 
       setStats({
         total_documents: result.total_documents || 0,
-        total_processed: result.total_processed || 0,
-        links_created: result.links_created || 0,
-        version_mentions: result.version_mentions || 0,
-        related_mentions: result.related_mentions || 0,
-        phantoms_created: result.phantoms_created || 0,
-        errors: result.errors || 0
+        remaining: result.remaining || 0,
+        iteration: result.iteration || 1
       });
 
-      if (result.status === 'completed') {
-        setProgress(100);
+      if (result.status === 'all_completed' || result.status === 'completed') {
         setIsRunning(false);
-        setAutoRefresh(false);
         toast({
-          title: '🎉 Поиск связей завершён!',
-          description: `Обработано: ${result.total_processed} документов`
+          title: '🎉 Поиск связей полностью завершён!',
+          description: `Обработано: ${result.total_documents} документов`
         });
       }
     } catch (error) {
@@ -124,49 +56,20 @@ export default function LinkFinder() {
         variant: 'destructive'
       });
       setIsRunning(false);
-      setAutoRefresh(false);
     }
   };
 
   const handleStop = () => {
     setIsRunning(false);
-    setAutoRefresh(false);
     toast({
       title: 'Остановлено',
-      description: 'Поиск связей остановлен вручную'
+      description: 'Поиск связей будет остановлен после текущей итерации'
     });
   };
 
-  const handleLogUpdate = (newLog: any) => {
-    setLastLogTime(new Date());
-    setStuckWarning(false);
-
-    if (newLog.step === 'document_completed' && newLog.details?.stats) {
-      setStats(prev => ({
-        total_documents: prev.total_documents,
-        total_processed: prev.total_processed + 1,
-        links_created: prev.links_created + (newLog.details.stats.links_created || 0),
-        version_mentions: prev.version_mentions + (newLog.details.stats.version_mentions || 0),
-        related_mentions: prev.related_mentions + (newLog.details.stats.related_mentions || 0),
-        phantoms_created: prev.phantoms_created + (newLog.details.stats.phantoms_created || 0),
-        errors: prev.errors + (newLog.details.stats.errors || 0)
-      }));
-
-      if (stats.total_documents > 0) {
-        setProgress((stats.total_processed / stats.total_documents) * 100);
-      }
-    }
-
-    if (newLog.step === 'session_completed') {
-      setIsRunning(false);
-      setAutoRefresh(false);
-      setProgress(100);
-      toast({
-        title: '🎉 Поиск связей полностью завершён!',
-        description: `Обработано ${newLog.details?.final_stats?.total_processed || 0} документов`
-      });
-    }
-  };
+  const progress = stats.total_documents > 0 
+    ? ((stats.total_documents - stats.remaining) / stats.total_documents) * 100 
+    : 0;
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -203,107 +106,62 @@ export default function LinkFinder() {
                 <li>Читает первые страницы каждого документа (DOCX/PDF)</li>
                 <li>Находит упоминания вида "постановление №123 от 01.02.2023"</li>
                 <li>Автоматически связывает документы в цепочки версий</li>
-                <li>Процесс можно остановить и продолжить позже</li>
+                <li>Работает в фоне, можно закрыть страницу</li>
               </ul>
             </div>
           </div>
         </Card>
 
-        {/* Прогресс и статистика */}
-        {(isRunning || stats.total_processed > 0) && (
-          <Card className="p-6 space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium">Прогресс:</span>
-                <span className="text-muted-foreground">
-                  {stats.total_processed} / {stats.total_documents} документов
-                </span>
-              </div>
-              <Progress value={progress} className="h-2" />
-              <div className="text-center text-sm text-muted-foreground">
-                {progress.toFixed(1)}%
-              </div>
+        {/* Прогресс и управление */}
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Процесс обработки</h2>
+            <div className="flex gap-2">
+              {!isRunning ? (
+                <Button onClick={handleStart} size="lg">
+                  <Icon name="Play" size={18} className="mr-2" />
+                  Запустить
+                </Button>
+              ) : (
+                <Button onClick={handleStop} variant="destructive" size="lg">
+                  <Icon name="Pause" size={18} className="mr-2" />
+                  Остановить
+                </Button>
+              )}
             </div>
+          </div>
 
-            <div className="grid grid-cols-4 gap-4">
-              <div className="text-center p-4 bg-green-50 rounded-lg">
-                <div className="text-3xl font-bold text-green-600">
-                  {stats.links_created}
+          {stats.total_documents > 0 && (
+            <>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium">Прогресс:</span>
+                  <span className="text-muted-foreground">
+                    {stats.total_documents - stats.remaining} / {stats.total_documents} документов
+                  </span>
                 </div>
-                <div className="text-sm text-green-700 mt-1">Связей найдено</div>
-              </div>
-              
-              <div className="text-center p-4 bg-blue-50 rounded-lg">
-                <div className="text-3xl font-bold text-blue-600">
-                  {stats.total_processed}
-                </div>
-                <div className="text-sm text-blue-700 mt-1">Обработано</div>
-              </div>
-
-              <div className="text-center p-4 bg-purple-50 rounded-lg">
-                <div className="text-3xl font-bold text-purple-600">
-                  {stats.version_mentions}
-                </div>
-                <div className="text-sm text-purple-700 mt-1">Упоминаний найдено</div>
-              </div>
-
-              <div className="text-center p-4 bg-red-50 rounded-lg">
-                <div className="text-3xl font-bold text-red-600">
-                  {stats.errors}
-                </div>
-                <div className="text-sm text-red-700 mt-1">Ошибок</div>
-              </div>
-            </div>
-
-            {isRunning ? (
-              <Button
-                onClick={handleStop}
-                variant="destructive"
-                size="lg"
-                className="w-full"
-              >
-                <Icon name="Square" size={20} />
-                Остановить
-              </Button>
-            ) : (
-              <Button
-                onClick={handleStart}
-                size="lg"
-                className="w-full"
-              >
-                <Icon name="Play" size={20} />
-                Запустить поиск связей
-              </Button>
-            )}
-
-            {stuckWarning && (
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center gap-3">
-                <Icon name="AlertTriangle" size={20} className="text-yellow-600" />
-                <div className="text-sm text-yellow-800">
-                  <p className="font-semibold">Система зависла</p>
-                  <p>Попытка {retryAttempts} из 3 перезапуска...</p>
+                <Progress value={progress} className="h-2" />
+                <div className="text-center text-sm text-muted-foreground">
+                  {progress.toFixed(1)}% • Итерация {stats.iteration}
                 </div>
               </div>
-            )}
-          </Card>
-        )}
 
-        {!isRunning && stats.total_processed === 0 && (
-          <Button
-            onClick={handleStart}
-            size="lg"
-            className="w-full"
-          >
-            <Icon name="Play" size={20} />
-            Запустить поиск связей
-          </Button>
-        )}
+              {stats.remaining > 0 && isRunning && (
+                <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm font-medium text-blue-900">
+                    Обработка в фоне... Осталось: {stats.remaining} документов
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </Card>
 
-        {/* Детальные логи */}
-        <LinkFinderLogs
-          sessionId={sessionId}
-          autoRefresh={autoRefresh}
-          onLogUpdate={handleLogUpdate}
+        {/* Логи */}
+        <LinkFinderLogs 
+          sessionId={sessionId} 
+          autoRefresh={isRunning}
         />
       </div>
     </div>
