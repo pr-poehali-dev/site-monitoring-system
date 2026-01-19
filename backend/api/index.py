@@ -146,7 +146,7 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
     
     where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
     
-    allowed_sorts = ['created_at', 'document_date', 'published_date', 'title', 'changes_count', 'file_size']
+    allowed_sorts = ['created_at', 'document_date', 'published_date', 'title', 'changes_count', 'file_size', 'related_count']
     if sort_by not in allowed_sorts:
         sort_by = 'created_at'
     if sort_order.upper() not in ['ASC', 'DESC']:

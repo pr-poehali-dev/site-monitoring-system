@@ -143,7 +143,12 @@ const DocumentsTab = ({
                 >
                   Изменений {getSortIcon('changes_count')}
                 </TableHead>
-                <TableHead className="text-center">Версии</TableHead>
+                <TableHead 
+                  className="cursor-pointer hover:bg-gray-50 text-center"
+                  onClick={() => handleSort('related_count')}
+                >
+                  Версии {getSortIcon('related_count')}
+                </TableHead>
                 <TableHead className="text-right">Файл</TableHead>
               </TableRow>
             </TableHeader>

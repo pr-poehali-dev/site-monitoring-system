@@ -6,7 +6,7 @@ export const useMonitoringState = () => {
   const [selectedSection, setSelectedSection] = useState('all');
   const [selectedYear, setSelectedYear] = useState('all');
   const [onlyActual, setOnlyActual] = useState(false);
-  const [sortBy, setSortBy] = useState('published_date');
+  const [sortBy, setSortBy] = useState('document_date');
   const [sortOrder, setSortOrder] = useState('DESC');
   const [documents, setDocuments] = useState<any[]>([]);
   const [totalDocuments, setTotalDocuments] = useState(0);
