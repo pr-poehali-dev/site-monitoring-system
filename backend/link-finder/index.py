@@ -43,16 +43,33 @@ def extract_document_references_from_pdf(file_bytes: bytes) -> list:
         return []
 
 def parse_document_references(text: str) -> list:
-    '''Парсит текст и находит упоминания документов вида "постановление №123 от 01.02.2023"'''
+    '''Парсит текст и находит упоминания документов вида "постановление №123 от 01.02.2023"
+    Поддерживает как одиночные упоминания, так и списки в формате "от DATE года №NUM, от DATE года №NUM"
+    '''
     references = []
     
-    patterns = [
+    # Паттерн 1: Обратный порядок - "от DATE года №NUM" (в списках изменений)
+    pattern_reverse = r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+(?:№|N|#)\s*(\d+)'
+    matches = re.finditer(pattern_reverse, text, re.IGNORECASE)
+    for match in matches:
+        date_str = match.group(1)
+        number = match.group(2)
+        
+        try:
+            date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+            date_formatted = date_obj.strftime('%Y-%m-%d')
+            references.append({'number': number, 'date': date_formatted})
+        except:
+            continue
+    
+    # Паттерн 2: Прямой порядок - "постановление №NUM от DATE" (в обычном тексте)
+    patterns_direct = [
         r'постановлени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
         r'постановлени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{2,4})',
-        r'(?:№|N|#)\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+        r'распоряжени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
     ]
     
-    for pattern in patterns:
+    for pattern in patterns_direct:
         matches = re.finditer(pattern, text, re.IGNORECASE)
         for match in matches:
             number = match.group(1)
@@ -69,6 +86,21 @@ def parse_document_references(text: str) -> list:
             except:
                 continue
     
+    # Паттерн 3: Упрощенный - просто "№NUM от DATE" (без слова "постановление")
+    pattern_simple = r'(?:№|N|#)\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})'
+    matches = re.finditer(pattern_simple, text, re.IGNORECASE)
+    for match in matches:
+        number = match.group(1)
+        date_str = match.group(2)
+        
+        try:
+            date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+            date_formatted = date_obj.strftime('%Y-%m-%d')
+            references.append({'number': number, 'date': date_formatted})
+        except:
+            continue
+    
+    # Убираем дубликаты
     unique_refs = []
     seen = set()
     for ref in references:
