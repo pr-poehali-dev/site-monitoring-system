@@ -71,6 +71,8 @@ const Index = () => {
               setSelectedYear={state.setSelectedYear}
               onlyActual={state.onlyActual}
               setOnlyActual={state.setOnlyActual}
+              onlyReal={state.onlyReal}
+              setOnlyReal={state.setOnlyReal}
               years={state.years}
               sortBy={state.sortBy}
               sortOrder={state.sortOrder}

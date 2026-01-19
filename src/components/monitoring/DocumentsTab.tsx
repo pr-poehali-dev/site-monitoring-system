@@ -18,6 +18,8 @@ interface DocumentsTabProps {
   setSelectedYear: (value: string) => void;
   onlyActual: boolean;
   setOnlyActual: (value: boolean) => void;
+  onlyReal: boolean;
+  setOnlyReal: (value: boolean) => void;
   years: string[];
   sortBy: string;
   sortOrder: string;
@@ -43,6 +45,8 @@ const DocumentsTab = ({
   setSelectedYear,
   onlyActual,
   setOnlyActual,
+  onlyReal,
+  setOnlyReal,
   years,
   sortBy,
   sortOrder,
@@ -106,6 +110,16 @@ const DocumentsTab = ({
               Только актуальные
             </Label>
           </div>
+          <div className="flex items-center space-x-2">
+            <Checkbox 
+              id="only-real" 
+              checked={onlyReal}
+              onCheckedChange={setOnlyReal}
+            />
+            <Label htmlFor="only-real" className="text-sm font-normal cursor-pointer">
+              Только реальные документы
+            </Label>
+          </div>
         </div>
 
         <div className="border rounded-lg overflow-x-auto">
@@ -154,12 +168,20 @@ const DocumentsTab = ({
             </TableHeader>
             <TableBody>
               {documents.map((doc) => (
-                <TableRow key={doc.id}>
+                <TableRow key={doc.id} className={doc.is_phantom ? 'bg-orange-50' : ''}>
                   <TableCell>
                     <div className="space-y-1 max-w-md">
-                      <div className="font-medium text-gray-900 text-sm">{doc.title}</div>
+                      <div className="font-medium text-gray-900 text-sm flex items-center gap-2">
+                        {doc.is_phantom && <Icon name="AlertCircle" size={14} className="text-orange-600" />}
+                        {doc.title}
+                      </div>
                       {doc.document_number && (
                         <div className="text-xs text-gray-500">№ {doc.document_number}</div>
+                      )}
+                      {doc.is_phantom && (
+                        <div className="text-xs text-orange-600">
+                          ⚠️ Файл не найден на сайте (упомянут в другом документе)
+                        </div>
                       )}
                     </div>
                   </TableCell>
@@ -218,7 +240,9 @@ const DocumentsTab = ({
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {doc.files && doc.files.length > 0 ? (
+                    {doc.is_phantom ? (
+                      <span className="text-gray-400 text-sm">—</span>
+                    ) : doc.files && doc.files.length > 0 ? (
                       <div className="flex flex-col gap-1">
                         {doc.files.map((file: any, idx: number) => (
                           <Button 

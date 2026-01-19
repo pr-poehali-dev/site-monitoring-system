@@ -157,6 +157,34 @@ const SettingsTab = ({
               <Button 
                 variant="destructive" 
                 className="w-full"
+                onClick={async () => {
+                  if (!confirm('Удалить все фантомные документы и сбросить логи поиска связей? Это позволит перезапустить поиск связей с улучшенной логикой.')) return;
+                  
+                  try {
+                    const response = await fetch('https://functions.poehali.dev/d1fe9958-10c9-49b0-9c5c-8213350e871e', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await response.json();
+                    alert(data.message || 'Фантомные документы удалены');
+                  } catch (error) {
+                    alert('Ошибка: ' + error);
+                  }
+                }}
+                disabled={loading}
+              >
+                <Icon name="Ghost" size={16} className="mr-2" />
+                Удалить все фантомные документы
+              </Button>
+              <p className="text-xs text-orange-600 text-center mt-2 font-medium">
+                ⚠️ Удалит фантомные версии и сбросит логи поиска связей
+              </p>
+            </div>
+
+            <div>
+              <Button 
+                variant="destructive" 
+                className="w-full"
                 onClick={handleFullReset}
                 disabled={loading}
               >

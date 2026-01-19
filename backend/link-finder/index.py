@@ -43,62 +43,75 @@ def extract_document_references_from_pdf(file_bytes: bytes) -> list:
         return []
 
 def parse_document_references(text: str) -> list:
-    '''Парсит текст и находит упоминания документов вида "постановление №123 от 01.02.2023"
-    Поддерживает как одиночные упоминания, так и списки в формате "от DATE года №NUM, от DATE года №NUM"
+    '''Парсит текст и находит ТОЛЬКО упоминания предыдущих версий документов.
+    Ищет контекстные фразы: "утратившим силу", "признать утратившим", "внести изменения" и т.п.
+    Возвращает ВСЕ найденные документы в контексте изменения/отмены.
     '''
     references = []
     
-    # Паттерн 1: Обратный порядок - "от DATE года №NUM" (в списках изменений)
-    pattern_reverse = r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+(?:№|N|#)\s*(\d+)'
-    matches = re.finditer(pattern_reverse, text, re.IGNORECASE)
-    for match in matches:
-        date_str = match.group(1)
-        number = match.group(2)
-        
-        try:
-            date_obj = datetime.strptime(date_str, '%d.%m.%Y')
-            date_formatted = date_obj.strftime('%Y-%m-%d')
-            references.append({'number': number, 'date': date_formatted})
-        except:
-            continue
-    
-    # Паттерн 2: Прямой порядок - "постановление №NUM от DATE" (в обычном тексте)
-    patterns_direct = [
-        r'постановлени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-        r'постановлени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{2,4})',
-        r'распоряжени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+    # Ключевые фразы, указывающие на связь с предыдущей версией
+    context_keywords = [
+        r'утратившим\s+силу',
+        r'признать\s+утратившим',
+        r'внести\s+изменени[яе]',
+        r'дополнить',
+        r'изложить\s+в\s+новой\s+редакции',
     ]
     
-    for pattern in patterns_direct:
-        matches = re.finditer(pattern, text, re.IGNORECASE)
-        for match in matches:
-            number = match.group(1)
-            date_str = match.group(2)
+    # Ищем абзацы/предложения с ключевыми фразами
+    for keyword_pattern in context_keywords:
+        # Находим все куски текста (до 500 символов) где встречается ключевая фраза
+        for keyword_match in re.finditer(keyword_pattern, text, re.IGNORECASE):
+            start_pos = max(0, keyword_match.start() - 200)
+            end_pos = min(len(text), keyword_match.end() + 300)
+            context_text = text[start_pos:end_pos]
             
-            try:
-                if len(date_str.split('.')[-1]) == 2:
-                    date_obj = datetime.strptime(date_str, '%d.%m.%y')
-                else:
+            # В этом контексте ищем все упоминания документов
+            
+            # Паттерн 1: "от DATE года №NUM"
+            pattern_reverse = r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+(?:№|N|#)\s*(\d+)'
+            for match in re.finditer(pattern_reverse, context_text, re.IGNORECASE):
+                try:
+                    date_str = match.group(1)
+                    number = match.group(2)
                     date_obj = datetime.strptime(date_str, '%d.%m.%Y')
-                
-                date_formatted = date_obj.strftime('%Y-%m-%d')
-                references.append({'number': number, 'date': date_formatted})
-            except:
-                continue
-    
-    # Паттерн 3: Упрощенный - просто "№NUM от DATE" (без слова "постановление")
-    pattern_simple = r'(?:№|N|#)\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})'
-    matches = re.finditer(pattern_simple, text, re.IGNORECASE)
-    for match in matches:
-        number = match.group(1)
-        date_str = match.group(2)
-        
-        try:
-            date_obj = datetime.strptime(date_str, '%d.%m.%Y')
-            date_formatted = date_obj.strftime('%Y-%m-%d')
-            references.append({'number': number, 'date': date_formatted})
-        except:
-            continue
+                    date_formatted = date_obj.strftime('%Y-%m-%d')
+                    references.append({'number': number, 'date': date_formatted})
+                except:
+                    continue
+            
+            # Паттерн 2: "постановление №NUM от DATE"
+            patterns_direct = [
+                r'постановлени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+                r'постановлени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{2,4})',
+                r'распоряжени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+            ]
+            
+            for pattern in patterns_direct:
+                for match in re.finditer(pattern, context_text, re.IGNORECASE):
+                    try:
+                        number = match.group(1)
+                        date_str = match.group(2)
+                        if len(date_str.split('.')[-1]) == 2:
+                            date_obj = datetime.strptime(date_str, '%d.%m.%y')
+                        else:
+                            date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+                        date_formatted = date_obj.strftime('%Y-%m-%d')
+                        references.append({'number': number, 'date': date_formatted})
+                    except:
+                        continue
+            
+            # Паттерн 3: "№NUM от DATE"
+            pattern_simple = r'(?:№|N|#)\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})'
+            for match in re.finditer(pattern_simple, context_text, re.IGNORECASE):
+                try:
+                    number = match.group(1)
+                    date_str = match.group(2)
+                    date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+                    date_formatted = date_obj.strftime('%Y-%m-%d')
+                    references.append({'number': number, 'date': date_formatted})
+                except:
+                    continue
     
     # Убираем дубликаты
     unique_refs = []

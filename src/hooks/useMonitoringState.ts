@@ -6,6 +6,7 @@ export const useMonitoringState = () => {
   const [selectedSection, setSelectedSection] = useState('all');
   const [selectedYear, setSelectedYear] = useState('all');
   const [onlyActual, setOnlyActual] = useState(false);
+  const [onlyReal, setOnlyReal] = useState(false);
   const [sortBy, setSortBy] = useState('document_date');
   const [sortOrder, setSortOrder] = useState('DESC');
   const [documents, setDocuments] = useState<any[]>([]);
@@ -61,6 +62,7 @@ export const useMonitoringState = () => {
       if (selectedSection !== 'all') params.section = selectedSection;
       if (selectedYear !== 'all') params.year = selectedYear;
       if (onlyActual) params.only_actual = 'true';
+      if (onlyReal) params.only_real = 'true';
       params.sort_by = sortBy;
       params.sort_order = sortOrder;
 
@@ -140,6 +142,8 @@ export const useMonitoringState = () => {
     setSelectedYear,
     onlyActual,
     setOnlyActual,
+    onlyReal,
+    setOnlyReal,
     sortBy,
     setSortBy,
     sortOrder,
