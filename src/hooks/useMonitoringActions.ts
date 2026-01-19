@@ -291,16 +291,37 @@ export const useMonitoringActions = ({
     
     try {
       const result = await apiClient.findDocumentRelations();
+      console.log('findDocumentRelations result:', result);
       
-      toast({
-        title: '🔗 Поиск связей завершён',
-        description: `Найдено: ${result.found_relations}, Не найдено: ${result.not_found_count}`
-      });
-
-      setTimeout(() => {
-        loadAllData();
+      // Автоматическое продолжение если статус in_progress
+      if (result.status === 'in_progress') {
+        toast({
+          title: '🔗 Поиск связей запущен',
+          description: `Прогресс: ${result.progress_percent}% (${result.total_processed}/${result.total_documents})`
+        });
+        
+        // Ждём 2 секунды и обновляем данные (следующий пакет запустится автоматически)
+        setTimeout(() => {
+          loadAllData();
+        }, 2000);
+      } else if (result.status === 'completed') {
+        toast({
+          title: '🎉 Поиск связей полностью завершён!',
+          description: `Обработано: ${result.total_documents}\nВерсий: ${result.total_versions}\nСвязей: ${result.total_related}`
+        });
+        
+        setTimeout(() => {
+          loadAllData();
+          setAutoRefreshLogs(false);
+        }, 2000);
+      } else {
+        // Уже обработано
+        toast({
+          title: '✅ Все документы обработаны',
+          description: result.message || 'Связи уже найдены для всех документов'
+        });
         setAutoRefreshLogs(false);
-      }, 2000);
+      }
     } catch (error) {
       toast({
         title: 'Ошибка',
