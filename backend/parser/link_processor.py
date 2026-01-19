@@ -17,7 +17,6 @@ parse_docx = link_parser.parse_docx
 parse_pdf = link_parser.parse_pdf
 extract_mentions = link_patterns.extract_mentions
 classify_mention = link_patterns.classify_mention
-is_external_document = link_patterns.is_external_document
 find_document_in_db = link_db.find_document_in_db
 create_phantom_document = link_db.create_phantom_document
 check_existing_link = link_db.check_existing_link
@@ -161,18 +160,14 @@ def process_single_document(cursor, conn, schema: str, session_id: str, doc: dic
     links_actions = []
     
     for mention in classified_mentions:
-        if mention['type'] == 'UNKNOWN':
-            continue
-        
-        is_external, exclusion_phrase = is_external_document(mention['context'])
-        
-        if is_external:
+        # Пропускаем только внешние документы
+        if mention['type'] == 'EXTERNAL':
             links_actions.append({
                 'action': 'skipped',
                 'reason': 'external_document',
                 'target_number': mention['number'],
                 'target_date': mention['date'],
-                'exclusion_phrase': exclusion_phrase
+                'exclusion_phrase': mention['keywords'][0] if mention['keywords'] else ''
             })
             continue
         

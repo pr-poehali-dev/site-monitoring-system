@@ -65,31 +65,33 @@ def extract_mentions(text: str) -> List[Dict]:
 
 
 def classify_mention(context: str) -> Tuple[str, List[str]]:
-    """Классифицировать упоминание: VERSION или RELATED"""
+    """Классифицировать упоминание: EXTERNAL, VERSION или RELATED"""
     context_lower = context.lower()
     
+    # 1. Проверяем на внешний документ (высший приоритет)
+    for phrase in EXCLUSION_PHRASES:
+        if phrase in context_lower:
+            return 'EXTERNAL', [phrase]
+    
+    # 2. Ищем VERSION ключевые слова
     found_version = []
     for keyword in VERSION_KEYWORDS:
         if re.search(keyword, context_lower):
             found_version.append(keyword)
     
+    if found_version:
+        return 'VERSION', found_version
+    
+    # 3. Ищем RELATED ключевые слова
     found_related = []
     for keyword in RELATED_KEYWORDS:
         if re.search(keyword, context_lower):
             found_related.append(keyword)
     
-    if found_version:
-        return 'VERSION', found_version
-    elif found_related:
+    if found_related:
         return 'RELATED', found_related
-    else:
-        return 'UNKNOWN', []
+    
+    # 4. Если ничего не нашли → считаем RELATED по умолчанию
+    return 'RELATED', []
 
 
-def is_external_document(context: str) -> Tuple[bool, str]:
-    """Проверить, является ли документ внешним"""
-    context_lower = context.lower()
-    for phrase in EXCLUSION_PHRASES:
-        if phrase in context_lower:
-            return True, phrase
-    return False, ''
