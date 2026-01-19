@@ -9,27 +9,38 @@ import { apiClient } from '@/config/api';
 
 const DocumentVersions = () => {
   const { documentId } = useParams<{ documentId: string }>();
-  const [data, setData] = useState<any>(null);
+  const [versionsData, setVersionsData] = useState<any>(null);
+  const [relatedData, setRelatedData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const loadVersions = async () => {
+    const loadData = async () => {
       if (!documentId) return;
       
       try {
         setLoading(true);
-        const result = await apiClient.getDocumentVersions(parseInt(documentId));
-        setData(result);
+        // Загружаем версии
+        const versions = await apiClient.getDocumentVersions(parseInt(documentId));
+        setVersionsData(versions);
+        
+        // Загружаем связанные документы
+        try {
+          const related = await apiClient.getRelatedDocuments(parseInt(documentId));
+          setRelatedData(related);
+        } catch (err) {
+          console.log('Связанных документов нет:', err);
+          setRelatedData({ related: [], total_related: 0 });
+        }
       } catch (err) {
-        setError('Не удалось загрузить версии документа');
+        setError('Не удалось загрузить данные документа');
         console.error(err);
       } finally {
         setLoading(false);
       }
     };
 
-    loadVersions();
+    loadData();
   }, [documentId]);
 
   const formatDate = (dateStr: string) => {
@@ -56,7 +67,7 @@ const DocumentVersions = () => {
     );
   }
 
-  if (error || !data) {
+  if (error || !versionsData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="w-full max-w-md">
@@ -77,7 +88,9 @@ const DocumentVersions = () => {
     );
   }
 
-  const { latest, versions, total_versions } = data;
+  const { latest, versions, total_versions } = versionsData;
+  const related = relatedData?.related || [];
+  const total_related = relatedData?.total_related || 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -153,11 +166,11 @@ const DocumentVersions = () => {
         </Card>
 
         {versions.length > 0 && (
-          <Card>
+          <Card className="mb-6">
             <CardHeader>
               <CardTitle>Предыдущие версии</CardTitle>
               <CardDescription>
-                История изменений документа (от новых к старым)
+                Документы которые были изменены или отменены этим документом
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -246,6 +259,93 @@ const DocumentVersions = () => {
                 <Icon name="FileQuestion" size={48} className="mx-auto mb-4 text-gray-400" />
                 <p className="text-lg font-medium mb-1">Нет версий</p>
                 <p className="text-sm">У этого документа пока нет изменений</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {related.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <CardTitle>Связанные документы</CardTitle>
+                  <CardDescription>
+                    Документы упомянутые в преамбуле (основания для издания)
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="text-sm">
+                  {total_related} {total_related === 1 ? 'документ' : total_related < 5 ? 'документа' : 'документов'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="border rounded-lg overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Название</TableHead>
+                      <TableHead>Номер</TableHead>
+                      <TableHead>Дата документа</TableHead>
+                      <TableHead>Тип связи</TableHead>
+                      <TableHead className="text-right">Файлы</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {related.map((doc: any) => (
+                      <TableRow key={doc.id} className="bg-blue-50">
+                        <TableCell>
+                          <div className="max-w-md">
+                            <div className="font-medium text-gray-900 text-sm flex items-center gap-2">
+                              <Icon name="Link" size={14} className="text-blue-600" />
+                              {doc.title}
+                            </div>
+                            {doc.context && (
+                              <div className="text-xs text-gray-600 mt-1 italic">
+                                "{doc.context.substring(0, 150)}..."
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-gray-600 text-sm">
+                          {doc.document_number || '-'}
+                        </TableCell>
+                        <TableCell className="text-gray-600 text-sm">
+                          {formatDate(doc.document_date)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs bg-blue-50">
+                            {doc.relation_type === 'reference' ? 'Упоминание' : 'Основание'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {doc.files && doc.files.length > 0 ? (
+                            <div className="flex gap-1 justify-end">
+                              {doc.files.map((file: any, idx: number) => (
+                                <Button 
+                                  key={idx} 
+                                  variant="outline" 
+                                  size="sm" 
+                                  asChild
+                                >
+                                  <a 
+                                    href={file.file_cdn_url || file.file_url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                  >
+                                    <Icon name="Download" size={14} />
+                                  </a>
+                                </Button>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             </CardContent>
           </Card>

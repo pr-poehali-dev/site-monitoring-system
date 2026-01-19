@@ -61,6 +61,11 @@ def handler(event: dict, context) -> dict:
                 if not document_id:
                     return error_response('document_id обязателен', 400)
                 result = get_document_versions(cursor, schema, int(document_id))
+            elif endpoint == 'related_documents':
+                document_id = query_params.get('document_id')
+                if not document_id:
+                    return error_response('document_id обязателен', 400)
+                result = get_related_documents(cursor, schema, int(document_id))
             elif endpoint == 'link_finding_logs':
                 result = get_link_finding_logs(cursor, schema, query_params)
             else:
@@ -173,7 +178,8 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
                d.file_size, d.file_cdn_url, d.changes_count, d.last_checked_at, d.created_at,
                d.related_to, d.is_actual, d.related_count, d.is_phantom, d.phantom_source_id,
                (SELECT COUNT(*) FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id) as prev_versions_count,
-               (d.related_count + (SELECT COUNT(*) FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id)) as total_versions
+               (d.related_count + (SELECT COUNT(*) FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id)) as total_versions,
+               COALESCE(d.related_docs_count, 0) as related_docs_count
         FROM {schema}.documents d
         WHERE {where_sql}
         {order_sql}
@@ -809,6 +815,61 @@ def get_document_versions(cursor, schema: str, document_id: int) -> dict:
         'latest': latest,
         'versions': previous_versions,
         'total_versions': len(unique_docs)
+    }
+
+
+def get_related_documents(cursor, schema: str, document_id: int) -> dict:
+    """Получение связанных документов (упоминания в преамбуле, основания).
+    НЕ версии документа, а просто связанные документы из related_documents таблицы."""
+    
+    # Получаем сам документ
+    cursor.execute(f"""
+        SELECT id, title, document_number, document_date, related_docs_count
+        FROM {schema}.documents
+        WHERE id = %s
+    """, (document_id,))
+    current_doc = cursor.fetchone()
+    
+    if not current_doc:
+        return {'error': 'Документ не найден', 'related': []}
+    
+    # Получаем все связанные документы
+    cursor.execute(f"""
+        SELECT d.id, d.title, d.url, d.section, d.published_date, d.document_date, d.document_number,
+               d.file_size, d.file_cdn_url, d.created_at, d.is_phantom,
+               rd.relation_type, rd.context
+        FROM {schema}.documents d
+        INNER JOIN {schema}.related_documents rd ON rd.related_document_id = d.id
+        WHERE rd.source_document_id = %s
+        ORDER BY d.document_date DESC NULLS LAST
+    """, (document_id,))
+    related_docs = cursor.fetchall()
+    
+    # Получаем файлы для связанных документов
+    if related_docs:
+        related_ids = [d['id'] for d in related_docs]
+        placeholders = ','.join(['%s'] * len(related_ids))
+        cursor.execute(f"""
+            SELECT document_id, file_url, file_type, file_name, file_size, file_cdn_url
+            FROM {schema}.document_files
+            WHERE document_id IN ({placeholders})
+            ORDER BY document_id, CASE WHEN file_type = 'main' THEN 0 ELSE 1 END
+        """, related_ids)
+        
+        files_by_doc = {}
+        for f in cursor.fetchall():
+            did = f['document_id']
+            if did not in files_by_doc:
+                files_by_doc[did] = []
+            files_by_doc[did].append(f)
+        
+        for doc in related_docs:
+            doc['files'] = files_by_doc.get(doc['id'], [])
+    
+    return {
+        'document': current_doc,
+        'related': related_docs,
+        'total_related': len(related_docs)
     }
 
 

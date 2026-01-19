@@ -215,5 +215,16 @@ export const apiClient = {
     const response = await fetch(`${API_BASE_URL}?${queryParams}`);
     if (!response.ok) throw new Error('Failed to fetch document versions');
     return response.json();
+  },
+
+  async getRelatedDocuments(documentId: number) {
+    const queryParams = new URLSearchParams({ 
+      endpoint: 'related_documents',
+      document_id: documentId.toString()
+    });
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`);
+    if (!response.ok) throw new Error('Failed to fetch related documents');
+    return response.json();
   }
 };

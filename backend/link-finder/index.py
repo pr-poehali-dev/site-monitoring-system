@@ -1,6 +1,8 @@
 '''
 API для автоматического поиска связей между документами через анализ их содержимого.
-Извлекает номера и даты документов из первых страниц файлов (docx/pdf).
+Извлекает номера и даты документов из первых страниц файлов (docx/pdf/doc).
+Различает ВЕРСИИ (изменения/отмена существующего документа) и СВЯЗАННЫЕ документы (упоминания в преамбуле).
+Версия: 2.0
 '''
 
 import json
@@ -12,24 +14,43 @@ import requests
 from io import BytesIO
 from datetime import datetime
 
-def extract_document_references_from_docx(file_bytes: bytes) -> list:
-    '''Извлекает ссылки на документы из DOCX файла'''
+def extract_document_references_from_doc(file_bytes: bytes) -> dict:
+    '''Извлекает ссылки из старого .doc файла.
+    Возвращает: {'versions': [...], 'related': [...]}
+    '''
+    try:
+        import olefile
+        ole = olefile.OleFileIO(file_bytes)
+        # Простое извлечение текста из .doc
+        text = file_bytes.decode('cp1251', errors='ignore')
+        # Убираем бинарный мусор
+        text = ''.join(c if c.isprintable() or c in '\n\r\t' else ' ' for c in text)
+        return parse_document_references(text)
+    except Exception as e:
+        return {'versions': [], 'related': []}
+
+def extract_document_references_from_docx(file_bytes: bytes) -> dict:
+    '''Извлекает ссылки на документы из DOCX файла.
+    Возвращает: {'versions': [...], 'related': [...]}
+    '''
     try:
         from docx import Document
         doc = Document(BytesIO(file_bytes))
         
         text = ""
         for i, para in enumerate(doc.paragraphs):
-            if i >= 20:
+            if i >= 25:  # Увеличено с 20 до 25 для лучшего покрытия
                 break
             text += para.text + "\n"
         
         return parse_document_references(text)
     except Exception as e:
-        return []
+        return {'versions': [], 'related': []}
 
-def extract_document_references_from_pdf(file_bytes: bytes) -> list:
-    '''Извлекает ссылки на документы из PDF файла'''
+def extract_document_references_from_pdf(file_bytes: bytes) -> dict:
+    '''Извлекает ссылки на документы из PDF файла.
+    Возвращает: {'versions': [...], 'related': [...]}
+    '''
     try:
         import PyPDF2
         pdf = PyPDF2.PdfReader(BytesIO(file_bytes))
@@ -40,16 +61,25 @@ def extract_document_references_from_pdf(file_bytes: bytes) -> list:
         
         return parse_document_references(text)
     except Exception as e:
-        return []
+        return {'versions': [], 'related': []}
 
-def parse_document_references(text: str) -> list:
-    '''Парсит текст и находит ТОЛЬКО упоминания предыдущих версий документов.
-    Ищет контекстные фразы: "утратившим силу", "признать утратившим", "внести изменения" и т.п.
-    Возвращает ВСЕ найденные документы в контексте изменения/отмены.
-    '''
-    references = []
+def parse_document_references(text: str) -> dict:
+    '''Парсит текст и находит документы, различая ВЕРСИИ и СВЯЗАННЫЕ документы.
     
-    # Список фраз-исключений, указывающих что это НЕ тот же уровень власти
+    ВЕРСИИ - документы которые:
+    - Упоминаются в контексте изменения/отмены ("утратившим силу", "внести изменения")
+    - Упоминаются В ЗАГОЛОВКЕ документа (первые 3 абзаца)
+    
+    СВЯЗАННЫЕ - документы которые:
+    - Упоминаются в преамбуле ("в соответствии с", "на основании")
+    - Просто упоминаются в тексте без контекста изменения
+    
+    Возвращает: {'versions': [...], 'related': [...]}
+    '''
+    versions = []
+    related = []
+    
+    # Список фраз-исключений (другие уровни власти)
     exclusion_phrases = [
         r'правительств[ао]\s+смоленской\s+области',
         r'администраци[ия]\s+смоленской\s+области',
@@ -57,10 +87,10 @@ def parse_document_references(text: str) -> list:
         r'правительств[ао]\s+рф',
     ]
     
-    # Ключевые фразы, указывающие на связь с предыдущей версией
-    context_keywords = [
+    # ВЕРСИИ: Ключевые фразы изменения/отмены документа
+    version_keywords = [
         r'утратившим\s+силу',
-        r'утрачива[ею]т\s+силу',  # утрачивает, утрачивают
+        r'утрачива[ею]т\s+силу',
         r'считать\s+утратившим',
         r'признать\s+утратившим',
         r'внести\s+изменени[яе]',
@@ -71,7 +101,7 @@ def parse_document_references(text: str) -> list:
         r'дополняется',
         r'дополнен',
         r'изложить\s+в\s+новой\s+редакции',
-        r'в\s+редакции\s+постановлени',  # Для списков вида "(в редакции постановлений ... от DATE №NUM, от DATE №NUM)"
+        r'в\s+редакции\s+постановлени',
         r'действует\s+в\s+редакции',
         r'отменить',
         r'отменяется',
@@ -80,149 +110,129 @@ def parse_document_references(text: str) -> list:
         r'исключить',
     ]
     
-    # Ищем абзацы/предложения с ключевыми фразами
-    for keyword_pattern in context_keywords:
-        # Находим все куски текста где встречается ключевая фраза
+    # СВЯЗАННЫЕ: Фразы для преамбулы (основание для издания документа)
+    related_keywords = [
+        r'в\s+соответствии\s+с',
+        r'на\s+основании',
+        r'руководствуясь',
+        r'в\s+целях',
+        r'согласно',
+        r'во\s+исполнение',
+    ]
+    
+    # Первые 3 абзаца - это ЗАГОЛОВОК (часто там название документа с упоминанием изменяемого)
+    paragraphs = text.split('\n')
+    title_text = '\n'.join(paragraphs[:3])
+    
+    # 1. Ищем ВЕРСИИ в заголовке (первые 3 строки)
+    title_versions = extract_references_from_context(title_text, None, exclusion_phrases, is_title=True)
+    versions.extend(title_versions)
+    
+    # 2. Ищем ВЕРСИИ в тексте с ключевыми фразами изменения
+    for keyword_pattern in version_keywords:
         for keyword_match in re.finditer(keyword_pattern, text, re.IGNORECASE):
-            # Для фразы "в редакции" берем больший контекст (до 2000 символов) для захвата длинных списков
+            # Для "в редакции" берем больший контекст (длинные списки)
             if 'редакции' in keyword_pattern:
                 start_pos = max(0, keyword_match.start() - 100)
                 end_pos = min(len(text), keyword_match.end() + 2000)
             else:
                 start_pos = max(0, keyword_match.start() - 200)
                 end_pos = min(len(text), keyword_match.end() + 300)
+            
+            context_text = text[start_pos:end_pos]
+            found_refs = extract_references_from_context(context_text, keyword_pattern, exclusion_phrases)
+            versions.extend(found_refs)
+    
+    # 3. Ищем СВЯЗАННЫЕ документы в преамбуле
+    for keyword_pattern in related_keywords:
+        for keyword_match in re.finditer(keyword_pattern, text, re.IGNORECASE):
+            start_pos = max(0, keyword_match.start() - 50)
+            end_pos = min(len(text), keyword_match.end() + 500)
             context_text = text[start_pos:end_pos]
             
-            # В этом контексте ищем все упоминания документов
-            
-            # Паттерн 1: "от DATE года №NUM" (включая варианты с N, #, без символа)
-            patterns_reverse = [
-                r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+№\s*(\d+)',
-                r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+N\s*(\d+)',
-                r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+#\s*(\d+)',
-            ]
-            
-            for pattern_reverse in patterns_reverse:
-                for match in re.finditer(pattern_reverse, context_text, re.IGNORECASE):
-                    try:
-                        date_str = match.group(1)
-                        number = match.group(2)
-                        
-                        # Фильтр: номер не должен быть слишком длинным (не больше 5 цифр)
-                        if len(number) > 5:
-                            continue
-                        
-                        # Проверяем предложение вокруг найденного документа (±80 символов)
-                        match_start_in_context = match.start()
-                        sentence_start = max(0, match_start_in_context - 80)
-                        sentence_end = min(len(context_text), match_start_in_context + match.end() - match.start() + 80)
-                        sentence = context_text[sentence_start:sentence_end]
-                        
-                        # Пропускаем если в предложении упоминается другой уровень власти
-                        skip_reference = False
-                        for exclusion in exclusion_phrases:
-                            if re.search(exclusion, sentence, re.IGNORECASE):
-                                skip_reference = True
-                                break
-                        if skip_reference:
-                            continue
-                        
-                        date_obj = datetime.strptime(date_str, '%d.%m.%Y')
-                        # Фильтр: год должен быть в разумных пределах (1990 - текущий год + 1)
-                        current_year = datetime.now().year
-                        if not (1990 <= date_obj.year <= current_year + 1):
-                            continue
-                        
-                        date_formatted = date_obj.strftime('%Y-%m-%d')
-                        references.append({'number': number, 'date': date_formatted})
-                    except:
-                        continue
-            
-            # Паттерн 2: "постановление №NUM от DATE"
-            patterns_direct = [
-                r'постановлени[ея]\s+№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-                r'постановлени[ея]\s+N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-                r'постановлени[ея]\s+#\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-                r'распоряжени[ея]\s+№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.d{4})',
-                r'распоряжени[ея]\s+N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-            ]
-            
-            for pattern in patterns_direct:
-                for match in re.finditer(pattern, context_text, re.IGNORECASE):
-                    try:
-                        number = match.group(1)
-                        date_str = match.group(2)
-                        
-                        # Фильтр: номер не должен быть слишком длинным
-                        if len(number) > 5:
-                            continue
-                        
-                        # Проверяем предложение вокруг найденного документа
-                        match_start_in_context = match.start()
-                        sentence_start = max(0, match_start_in_context - 80)
-                        sentence_end = min(len(context_text), match_start_in_context + match.end() - match.start() + 80)
-                        sentence = context_text[sentence_start:sentence_end]
-                        
-                        skip_reference = False
-                        for exclusion in exclusion_phrases:
-                            if re.search(exclusion, sentence, re.IGNORECASE):
-                                skip_reference = True
-                                break
-                        if skip_reference:
-                            continue
-                        
-                        date_obj = datetime.strptime(date_str, '%d.%m.%Y')
-                        current_year = datetime.now().year
-                        if not (1990 <= date_obj.year <= current_year + 1):
-                            continue
-                        
-                        date_formatted = date_obj.strftime('%Y-%m-%d')
-                        references.append({'number': number, 'date': date_formatted})
-                    except:
-                        continue
-            
-            # Паттерн 3: "№NUM от DATE" (простой формат)
-            patterns_simple = [
-                r'№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-                r'N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-                r'#\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-            ]
-            
-            for pattern_simple in patterns_simple:
-                for match in re.finditer(pattern_simple, context_text, re.IGNORECASE):
-                    try:
-                        number = match.group(1)
-                        date_str = match.group(2)
-                        
-                        # Фильтр: номер не должен быть слишком длинным
-                        if len(number) > 5:
-                            continue
-                        
-                        # Проверяем предложение вокруг найденного документа
-                        match_start_in_context = match.start()
-                        sentence_start = max(0, match_start_in_context - 80)
-                        sentence_end = min(len(context_text), match_start_in_context + match.end() - match.start() + 80)
-                        sentence = context_text[sentence_start:sentence_end]
-                        
-                        skip_reference = False
-                        for exclusion in exclusion_phrases:
-                            if re.search(exclusion, sentence, re.IGNORECASE):
-                                skip_reference = True
-                                break
-                        if skip_reference:
-                            continue
-                        
-                        date_obj = datetime.strptime(date_str, '%d.%m.%Y')
-                        current_year = datetime.now().year
-                        if not (1990 <= date_obj.year <= current_year + 1):
-                            continue
-                        
-                        date_formatted = date_obj.strftime('%Y-%m-%d')
-                        references.append({'number': number, 'date': date_formatted})
-                    except:
-                        continue
+            found_refs = extract_references_from_context(context_text, keyword_pattern, exclusion_phrases)
+            related.extend(found_refs)
     
     # Убираем дубликаты
+    versions = deduplicate_references(versions)
+    related = deduplicate_references(related)
+    
+    # Исключаем из related те, что уже есть в versions
+    version_keys = {f"{v['number']}_{v['date']}" for v in versions}
+    related = [r for r in related if f"{r['number']}_{r['date']}" not in version_keys]
+    
+    return {'versions': versions, 'related': related}
+
+def extract_references_from_context(context_text: str, keyword_pattern: str, exclusion_phrases: list, is_title: bool = False) -> list:
+    '''Извлекает ссылки на документы из контекста.
+    
+    is_title=True означает что это заголовок документа - там высокая вероятность что упоминается изменяемый документ
+    '''
+    references = []
+    
+    # Паттерны для поиска документов
+    patterns = [
+        # "от DATE года №NUM"
+        (r'от\s+(\d{2}\.\d{2}\.\d{4})\s+г(?:ода)?\.?\s+№\s*(\d+)', 'date_first'),
+        (r'от\s+(\d{2}\.\d{2}\.\d{4})\s+г(?:ода)?\.?\s+N\s*(\d+)', 'date_first'),
+        # "постановление №NUM от DATE"
+        (r'постановлени[ея]\s+№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})', 'number_first'),
+        (r'постановлени[ея]\s+N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})', 'number_first'),
+        # "№NUM от DATE"
+        (r'№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})', 'number_first'),
+        (r'N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})', 'number_first'),
+    ]
+    
+    for pattern, order in patterns:
+        for match in re.finditer(pattern, context_text, re.IGNORECASE):
+            try:
+                if order == 'date_first':
+                    date_str = match.group(1)
+                    number = match.group(2)
+                else:  # number_first
+                    number = match.group(1)
+                    date_str = match.group(2)
+                
+                # Фильтр: номер не более 5 цифр
+                if len(number) > 5:
+                    continue
+                
+                # Проверяем предложение вокруг (±80 символов)
+                match_start = match.start()
+                sentence_start = max(0, match_start - 80)
+                sentence_end = min(len(context_text), match.end() + 80)
+                sentence = context_text[sentence_start:sentence_end]
+                
+                # Пропускаем если другой уровень власти
+                skip = False
+                for exclusion in exclusion_phrases:
+                    if re.search(exclusion, sentence, re.IGNORECASE):
+                        skip = True
+                        break
+                if skip:
+                    continue
+                
+                # Проверяем год
+                date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+                current_year = datetime.now().year
+                if not (1990 <= date_obj.year <= current_year + 1):
+                    continue
+                
+                date_formatted = date_obj.strftime('%Y-%m-%d')
+                
+                # Сохраняем контекст для определения типа связи
+                references.append({
+                    'number': number,
+                    'date': date_formatted,
+                    'context': sentence[:200]  # Первые 200 символов контекста
+                })
+            except:
+                continue
+    
+    return references
+
+def deduplicate_references(references: list) -> list:
+    '''Убирает дубликаты из списка ссылок'''
     unique_refs = []
     seen = set()
     for ref in references:
@@ -230,11 +240,15 @@ def parse_document_references(text: str) -> list:
         if key not in seen:
             seen.add(key)
             unique_refs.append(ref)
-    
     return unique_refs
 
 def handler(event: dict, context) -> dict:
-    '''API для поиска связей между документами через анализ содержимого файлов'''
+    '''API для поиска связей между документами через анализ содержимого файлов.
+    
+    Различает:
+    - ВЕРСИИ (document_relations): изменения/отмена существующих документов
+    - СВЯЗАННЫЕ (related_documents): упоминания в преамбуле, основания для издания
+    '''
     
     method = event.get('httpMethod', 'GET')
     
@@ -275,11 +289,9 @@ def handler(event: dict, context) -> dict:
         
         cursor.execute("SELECT current_schema()")
         schema_result = cursor.fetchone()
-        if not schema_result:
-            schema = 'public'
-        else:
-            schema = schema_result['current_schema']
+        schema = schema_result['current_schema'] if schema_result else 'public'
         
+        # Получаем документы для обработки
         if batch_mode:
             query = f"""
                 SELECT id, document_number, document_date, file_cdn_url, title, section, 
@@ -289,7 +301,7 @@ def handler(event: dict, context) -> dict:
                   AND related_to IS NULL
                   AND related_count = 0
                   AND (is_phantom IS NULL OR is_phantom = FALSE)
-                  AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.pdf')
+                  AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.pdf' OR file_cdn_url LIKE '%.doc')
                   AND NOT EXISTS (
                       SELECT 1 FROM {schema}.link_finding_logs lfl 
                       WHERE lfl.document_id = d.id
@@ -309,7 +321,7 @@ def handler(event: dict, context) -> dict:
                 }
             
             cursor.execute(f"""
-                SELECT id, document_number, document_date, file_cdn_url, title
+                SELECT id, document_number, document_date, file_cdn_url, title, section
                 FROM {schema}.documents
                 WHERE id = %s
             """, (document_id,))
@@ -335,15 +347,19 @@ def handler(event: dict, context) -> dict:
                 continue
             
             try:
+                # Скачиваем файл
                 response = requests.get(doc['file_cdn_url'], timeout=30)
                 response.raise_for_status()
                 
                 file_extension = doc['file_cdn_url'].split('.')[-1].lower()
                 
+                # Парсим документ
                 if file_extension == 'docx':
-                    references = extract_document_references_from_docx(response.content)
+                    refs_data = extract_document_references_from_docx(response.content)
+                elif file_extension == 'doc':
+                    refs_data = extract_document_references_from_doc(response.content)
                 elif file_extension == 'pdf':
-                    references = extract_document_references_from_pdf(response.content)
+                    refs_data = extract_document_references_from_pdf(response.content)
                 else:
                     results.append({
                         'document_id': doc['id'],
@@ -352,7 +368,11 @@ def handler(event: dict, context) -> dict:
                     })
                     continue
                 
-                if not references:
+                version_refs = refs_data.get('versions', [])
+                related_refs = refs_data.get('related', [])
+                
+                # Если ничего не найдено
+                if not version_refs and not related_refs:
                     cursor.execute(f"""
                         INSERT INTO {schema}.link_finding_logs 
                         (document_id, document_number, status, references_found, message)
@@ -364,16 +384,19 @@ def handler(event: dict, context) -> dict:
                         'document_id': doc['id'],
                         'document_number': doc['document_number'],
                         'status': 'no_references',
-                        'links_created': 0
+                        'versions_created': 0,
+                        'related_created': 0
                     })
                     continue
                 
-                links_created = 0
-                found_documents = []
-                not_found_refs = []
+                versions_created = 0
+                related_created = 0
+                found_versions = []
+                found_related = []
                 phantom_created = 0
                 
-                for ref in references:
+                # Обрабатываем ВЕРСИИ
+                for ref in version_refs:
                     cursor.execute(f"""
                         SELECT id, document_number, document_date, title
                         FROM {schema}.documents
@@ -386,7 +409,7 @@ def handler(event: dict, context) -> dict:
                     target_doc = cursor.fetchone()
                     
                     if target_doc:
-                        # Используем новую таблицу document_relations вместо related_to
+                        # Создаем связь версии
                         cursor.execute(f"""
                             INSERT INTO {schema}.document_relations 
                             (source_document_id, target_document_id, relation_type)
@@ -395,31 +418,30 @@ def handler(event: dict, context) -> dict:
                         """, (doc['id'], target_doc['id']))
                         
                         if cursor.rowcount > 0:
-                            links_created += 1
+                            versions_created += 1
                             
-                            # Устанавливаем related_to у СТАРОГО документа (target) → указывает на новый (doc)
+                            # Устанавливаем related_to у старого документа
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_to = %s
                                 WHERE id = %s AND related_to IS NULL
                             """, (doc['id'], target_doc['id']))
                             
-                            # Увеличиваем счетчик новых версий у старого документа
+                            # Увеличиваем счетчик новых версий
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_count = related_count + 1
                                 WHERE id = %s
                             """, (target_doc['id'],))
                             
-                            found_documents.append({
+                            found_versions.append({
                                 'id': target_doc['id'],
                                 'number': target_doc['document_number'],
                                 'date': str(target_doc['document_date']),
                                 'title': target_doc['title']
                             })
                     else:
-                        not_found_refs.append(f"№{ref['number']} от {ref['date']}")
-                        
+                        # Создаем фантом для версии
                         cursor.execute(f"""
                             SELECT id FROM {schema}.documents
                             WHERE document_number = %s
@@ -444,28 +466,25 @@ def handler(event: dict, context) -> dict:
                             phantom_id = cursor.fetchone()['id']
                             phantom_created += 1
                             
-                            # Добавляем в document_relations
                             cursor.execute(f"""
                                 INSERT INTO {schema}.document_relations 
                                 (source_document_id, target_document_id, relation_type)
                                 VALUES (%s, %s, 'previous_version')
                             """, (doc['id'], phantom_id))
                             
-                            # Устанавливаем related_to у фантома → указывает на новый документ
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_to = %s
-                                WHERE id = %s AND related_to IS NULL
+                                WHERE id = %s
                             """, (doc['id'], phantom_id))
                             
-                            # Увеличиваем счетчик у фантома
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_count = related_count + 1
                                 WHERE id = %s
                             """, (phantom_id,))
                         else:
-                            # Фантом уже существует, добавляем связь
+                            # Фантом существует, добавляем связь
                             cursor.execute(f"""
                                 INSERT INTO {schema}.document_relations 
                                 (source_document_id, target_document_id, relation_type)
@@ -474,57 +493,97 @@ def handler(event: dict, context) -> dict:
                             """, (doc['id'], existing_phantom['id']))
                             
                             if cursor.rowcount > 0:
-                                links_created += 1
                                 cursor.execute(f"""
                                     UPDATE {schema}.documents
                                     SET related_count = related_count + 1
                                     WHERE id = %s
                                 """, (existing_phantom['id'],))
                 
-                conn.commit()
+                # Обрабатываем СВЯЗАННЫЕ документы
+                for ref in related_refs:
+                    cursor.execute(f"""
+                        SELECT id, document_number, document_date, title
+                        FROM {schema}.documents
+                        WHERE document_number = %s
+                          AND document_date = %s
+                          AND id != %s
+                        LIMIT 1
+                    """, (ref['number'], ref['date'], doc['id']))
+                    
+                    related_doc = cursor.fetchone()
+                    
+                    if related_doc:
+                        # Создаем связь связанного документа
+                        cursor.execute(f"""
+                            INSERT INTO {schema}.related_documents 
+                            (source_document_id, related_document_id, relation_type, context)
+                            VALUES (%s, %s, 'reference', %s)
+                            ON CONFLICT (source_document_id, related_document_id) DO NOTHING
+                        """, (doc['id'], related_doc['id'], ref.get('context', '')[:200]))
+                        
+                        if cursor.rowcount > 0:
+                            related_created += 1
+                            
+                            # Увеличиваем счетчик связанных документов
+                            cursor.execute(f"""
+                                UPDATE {schema}.documents
+                                SET related_docs_count = related_docs_count + 1
+                                WHERE id = %s
+                            """, (doc['id'],))
+                            
+                            found_related.append({
+                                'id': related_doc['id'],
+                                'number': related_doc['document_number'],
+                                'date': str(related_doc['document_date']),
+                                'title': related_doc['title']
+                            })
                 
-                not_found_str = ', '.join(not_found_refs[:10]) if not_found_refs else None
-                log_message = f"Найдено {len(references)} упоминаний, создано {links_created} связей"
-                if phantom_created > 0:
-                    log_message += f", создано {phantom_created} фиктивных версий"
+                # Обновляем счетчики prev_versions_count
+                cursor.execute(f"""
+                    UPDATE {schema}.documents
+                    SET prev_versions_count = (
+                        SELECT COUNT(*)
+                        FROM {schema}.document_relations
+                        WHERE source_document_id = {doc['id']} AND relation_type = 'previous_version'
+                    )
+                    WHERE id = %s
+                """, (doc['id'],))
                 
+                # Логируем результат
                 cursor.execute(f"""
                     INSERT INTO {schema}.link_finding_logs 
-                    (document_id, document_number, status, references_found, links_created, not_found_refs, message)
+                    (document_id, document_number, status, references_found, links_created, phantoms_created, message)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (doc['id'], doc['document_number'], 'success', len(references), links_created, not_found_str, log_message))
-                conn.commit()
+                """, (
+                    doc['id'],
+                    doc['document_number'],
+                    'success',
+                    len(version_refs) + len(related_refs),
+                    versions_created + related_created,
+                    phantom_created,
+                    f"Версий: {versions_created}, Связанных: {related_created}, Фантомов: {phantom_created}"
+                ))
                 
-                result_item = {
-                    'document_id': doc['id'],
-                    'document_number': doc['document_number'],
-                    'status': 'success',
-                    'references_found': len(references),
-                    'links_created': links_created,
-                    'phantom_created': phantom_created,
-                    'found_documents': found_documents
-                }
-                
-                if not_found_refs:
-                    result_item['not_found'] = not_found_refs[:5]
-                
-                results.append(result_item)
-                
-            except Exception as e:
-                import traceback
-                error_details = f"{str(e)}\n{traceback.format_exc()}"
-                
-                cursor.execute(f"""
-                    INSERT INTO {schema}.link_finding_logs 
-                    (document_id, document_number, status, message)
-                    VALUES (%s, %s, %s, %s)
-                """, (doc['id'], doc['document_number'], 'error', f"Ошибка: {error_details[:500]}"))
                 conn.commit()
                 
                 results.append({
                     'document_id': doc['id'],
+                    'document_number': doc['document_number'],
+                    'status': 'success',
+                    'versions_created': versions_created,
+                    'related_created': related_created,
+                    'phantoms_created': phantom_created,
+                    'found_versions': found_versions,
+                    'found_related': found_related
+                })
+                
+            except Exception as e:
+                conn.rollback()
+                results.append({
+                    'document_id': doc['id'],
+                    'document_number': doc.get('document_number'),
                     'status': 'error',
-                    'error': error_details[:200]
+                    'error': str(e)
                 })
         
         cursor.close()
@@ -536,14 +595,12 @@ def handler(event: dict, context) -> dict:
             'body': json.dumps({
                 'processed': len(results),
                 'results': results
-            })
+            }, ensure_ascii=False, default=str)
         }
         
     except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-            'body': json.dumps({'error': str(e), 'trace': error_trace})
+            'body': json.dumps({'error': str(e)})
         }
