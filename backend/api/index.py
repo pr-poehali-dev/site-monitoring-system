@@ -61,6 +61,8 @@ def handler(event: dict, context) -> dict:
                 if not document_id:
                     return error_response('document_id обязателен', 400)
                 result = get_document_versions(cursor, schema, int(document_id))
+            elif endpoint == 'link_finding_logs':
+                result = get_link_finding_logs(cursor, schema, query_params)
             else:
                 cursor.close()
                 conn.close()
@@ -250,6 +252,33 @@ def get_logs(cursor, schema: str, params: dict) -> dict:
         SELECT id, section, status, message, duration_ms, started_at, finished_at
         FROM {schema}.parsing_logs
         ORDER BY started_at DESC
+        LIMIT %s
+    """, (limit,))
+    
+    logs = cursor.fetchall()
+    
+    return {'logs': logs}
+
+
+def get_link_finding_logs(cursor, schema: str, params: dict) -> dict:
+    """Получение логов поиска связей"""
+    limit = int(params.get('limit', '100'))
+    
+    cursor.execute(f"""
+        SELECT 
+            lfl.id,
+            lfl.document_id,
+            lfl.document_number,
+            lfl.status,
+            lfl.references_found,
+            lfl.links_created,
+            lfl.not_found_refs,
+            lfl.message,
+            lfl.created_at,
+            d.title as document_title
+        FROM {schema}.link_finding_logs lfl
+        LEFT JOIN {schema}.documents d ON lfl.document_id = d.id
+        ORDER BY lfl.created_at DESC
         LIMIT %s
     """, (limit,))
     
@@ -665,7 +694,7 @@ def get_document_versions(cursor, schema: str, document_id: int) -> dict:
     # Получаем сам документ
     cursor.execute(f"""
         SELECT id, title, url, section, published_date, document_date, document_number,
-               file_size, file_cdn_url, created_at, related_to, is_actual, related_count
+               file_size, file_cdn_url, created_at, related_to, is_actual, related_count, is_phantom, phantom_source_id
         FROM {schema}.documents
         WHERE id = %s
     """, (document_id,))
@@ -681,7 +710,7 @@ def get_document_versions(cursor, schema: str, document_id: int) -> dict:
     # Сортируем по самой свежей доступной дате (document_date → published_date → created_at)
     cursor.execute(f"""
         SELECT id, title, url, section, published_date, document_date, document_number,
-               file_size, file_cdn_url, created_at, related_to, is_actual, related_count
+               file_size, file_cdn_url, created_at, related_to, is_actual, related_count, is_phantom, phantom_source_id
         FROM {schema}.documents
         WHERE id = %s OR related_to = %s
         ORDER BY COALESCE(document_date, published_date, created_at) DESC, created_at DESC

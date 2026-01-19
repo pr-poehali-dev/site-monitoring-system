@@ -175,12 +175,20 @@ const DocumentVersions = () => {
                   </TableHeader>
                   <TableBody>
                     {versions.map((version: any) => (
-                      <TableRow key={version.id}>
+                      <TableRow key={version.id} className={version.is_phantom ? 'bg-orange-50' : ''}>
                         <TableCell>
                           <div className="max-w-md">
-                            <div className="font-medium text-gray-900 text-sm">
+                            <div className="font-medium text-gray-900 text-sm flex items-center gap-2">
+                              {version.is_phantom && (
+                                <Icon name="AlertCircle" size={14} className="text-orange-600" />
+                              )}
                               {version.title}
                             </div>
+                            {version.is_phantom && (
+                              <div className="text-xs text-orange-600 mt-1">
+                                ⚠️ Файл не найден на сайте (упомянут в другом документе)
+                              </div>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell className="text-gray-600 text-sm">
@@ -193,8 +201,8 @@ const DocumentVersions = () => {
                           {formatDate(version.published_date)}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="secondary" className="text-xs">
-                            {version.section}
+                          <Badge variant={version.is_phantom ? 'destructive' : 'secondary'} className="text-xs">
+                            {version.is_phantom ? 'Не найден' : version.section}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">

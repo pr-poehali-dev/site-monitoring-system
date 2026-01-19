@@ -156,12 +156,15 @@ def handler(event: dict, context) -> dict:
         
         if batch_mode:
             cursor.execute(f"""
-                SELECT id, document_number, document_date, file_cdn_url, title
+                SELECT id, document_number, document_date, file_cdn_url, title, section
                 FROM {schema}.documents
                 WHERE file_cdn_url IS NOT NULL
                   AND related_to IS NULL
                   AND related_count = 0
-                ORDER BY id DESC
+                  AND is_phantom = FALSE
+                ORDER BY 
+                    COALESCE(document_date, published_date, created_at) DESC,
+                    id DESC
                 LIMIT %s
             """, (limit,))
         else:
@@ -217,6 +220,13 @@ def handler(event: dict, context) -> dict:
                     continue
                 
                 if not references:
+                    cursor.execute(f"""
+                        INSERT INTO {schema}.link_finding_logs 
+                        (document_id, document_number, status, references_found, message)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (doc['id'], doc['document_number'], 'no_references', 0, 'Упоминаний не найдено'))
+                    conn.commit()
+                    
                     results.append({
                         'document_id': doc['id'],
                         'document_number': doc['document_number'],
@@ -228,6 +238,7 @@ def handler(event: dict, context) -> dict:
                 links_created = 0
                 found_documents = []
                 not_found_refs = []
+                phantom_created = 0
                 
                 for ref in references:
                     cursor.execute(f"""
@@ -265,7 +276,54 @@ def handler(event: dict, context) -> dict:
                             })
                     else:
                         not_found_refs.append(f"№{ref['number']} от {ref['date']}")
+                        
+                        cursor.execute(f"""
+                            SELECT id FROM {schema}.documents
+                            WHERE document_number = %s
+                              AND document_date = %s
+                              AND is_phantom = TRUE
+                            LIMIT 1
+                        """, (ref['number'], ref['date']))
+                        
+                        existing_phantom = cursor.fetchone()
+                        
+                        if not existing_phantom:
+                            phantom_title = f"Постановление {ref['number']} от {ref['date']}: [Файл не найден на сайте]"
+                            
+                            cursor.execute(f"""
+                                INSERT INTO {schema}.documents 
+                                (document_number, document_date, title, section, is_phantom, phantom_source_id, url)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                RETURNING id
+                            """, (ref['number'], ref['date'], phantom_title, doc.get('section', 'Постановления'), True, doc['id'], ''))
+                            
+                            phantom_id = cursor.fetchone()['id']
+                            phantom_created += 1
+                            
+                            cursor.execute(f"""
+                                UPDATE {schema}.documents
+                                SET related_to = %s
+                                WHERE id = %s
+                            """, (phantom_id, doc['id']))
+                            
+                            cursor.execute(f"""
+                                UPDATE {schema}.documents
+                                SET related_count = related_count + 1
+                                WHERE id = %s
+                            """, (phantom_id,))
                 
+                conn.commit()
+                
+                not_found_str = ', '.join(not_found_refs[:10]) if not_found_refs else None
+                log_message = f"Найдено {len(references)} упоминаний, создано {links_created} связей"
+                if phantom_created > 0:
+                    log_message += f", создано {phantom_created} фиктивных версий"
+                
+                cursor.execute(f"""
+                    INSERT INTO {schema}.link_finding_logs 
+                    (document_id, document_number, status, references_found, links_created, not_found_refs, message)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (doc['id'], doc['document_number'], 'success', len(references), links_created, not_found_str, log_message))
                 conn.commit()
                 
                 result_item = {
@@ -274,6 +332,7 @@ def handler(event: dict, context) -> dict:
                     'status': 'success',
                     'references_found': len(references),
                     'links_created': links_created,
+                    'phantom_created': phantom_created,
                     'found_documents': found_documents
                 }
                 
@@ -283,6 +342,13 @@ def handler(event: dict, context) -> dict:
                 results.append(result_item)
                 
             except Exception as e:
+                cursor.execute(f"""
+                    INSERT INTO {schema}.link_finding_logs 
+                    (document_id, document_number, status, message)
+                    VALUES (%s, %s, %s, %s)
+                """, (doc['id'], doc['document_number'], 'error', f"Ошибка: {str(e)}"))
+                conn.commit()
+                
                 results.append({
                     'document_id': doc['id'],
                     'status': 'error',
