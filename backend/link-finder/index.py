@@ -289,13 +289,14 @@ def handler(event: dict, context) -> dict:
                         
                         if not existing_phantom:
                             phantom_title = f"Постановление {ref['number']} от {ref['date']}: [Файл не найден на сайте]"
+                            phantom_url = f"phantom://{ref['number']}/{ref['date']}/source-{doc['id']}"
                             
                             cursor.execute(f"""
                                 INSERT INTO {schema}.documents 
                                 (document_number, document_date, title, section, is_phantom, phantom_source_id, url)
                                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                                 RETURNING id
-                            """, (ref['number'], ref['date'], phantom_title, doc.get('section', 'Постановления'), True, doc['id'], ''))
+                            """, (ref['number'], ref['date'], phantom_title, doc.get('section', 'Постановления'), True, doc['id'], phantom_url))
                             
                             phantom_id = cursor.fetchone()['id']
                             phantom_created += 1
@@ -342,17 +343,20 @@ def handler(event: dict, context) -> dict:
                 results.append(result_item)
                 
             except Exception as e:
+                import traceback
+                error_details = f"{str(e)}\n{traceback.format_exc()}"
+                
                 cursor.execute(f"""
                     INSERT INTO {schema}.link_finding_logs 
                     (document_id, document_number, status, message)
                     VALUES (%s, %s, %s, %s)
-                """, (doc['id'], doc['document_number'], 'error', f"Ошибка: {str(e)}"))
+                """, (doc['id'], doc['document_number'], 'error', f"Ошибка: {error_details[:500]}"))
                 conn.commit()
                 
                 results.append({
                     'document_id': doc['id'],
                     'status': 'error',
-                    'error': str(e)
+                    'error': error_details[:200]
                 })
         
         cursor.close()

@@ -21,6 +21,7 @@ const LinkFindingLogs = () => {
   const [logs, setLogs] = useState<LinkFindingLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const fetchLogs = async () => {
     try {
@@ -113,6 +114,74 @@ const LinkFindingLogs = () => {
         </div>
       </CardHeader>
       <CardContent>
+        <div className="mb-4 grid grid-cols-4 gap-3">
+          <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div className="text-2xl font-bold text-green-700">
+              {logs.filter(l => l.status === 'success' && l.links_created > 0).length}
+            </div>
+            <div className="text-xs text-green-600">Успешно связано</div>
+          </div>
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="text-2xl font-bold text-blue-700">
+              {logs.filter(l => l.status === 'success').reduce((sum, l) => sum + (l.references_found || 0), 0)}
+            </div>
+            <div className="text-xs text-blue-600">Упоминаний найдено</div>
+          </div>
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="text-2xl font-bold text-red-700">
+              {logs.filter(l => l.status === 'error').length}
+            </div>
+            <div className="text-xs text-red-600">Ошибок</div>
+          </div>
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <div className="text-2xl font-bold text-gray-700">{logs.length}</div>
+            <div className="text-xs text-gray-600">Всего обработано</div>
+          </div>
+        </div>
+
+        <div className="mb-4 flex gap-2">
+          <button
+            onClick={() => setStatusFilter('all')}
+            className={`px-3 py-1 text-xs rounded ${
+              statusFilter === 'all'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Все ({logs.length})
+          </button>
+          <button
+            onClick={() => setStatusFilter('success')}
+            className={`px-3 py-1 text-xs rounded ${
+              statusFilter === 'success'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Успешные ({logs.filter(l => l.status === 'success').length})
+          </button>
+          <button
+            onClick={() => setStatusFilter('error')}
+            className={`px-3 py-1 text-xs rounded ${
+              statusFilter === 'error'
+                ? 'bg-red-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Ошибки ({logs.filter(l => l.status === 'error').length})
+          </button>
+          <button
+            onClick={() => setStatusFilter('no_references')}
+            className={`px-3 py-1 text-xs rounded ${
+              statusFilter === 'no_references'
+                ? 'bg-gray-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Без упоминаний ({logs.filter(l => l.status === 'no_references').length})
+          </button>
+        </div>
+
         {logs.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             <Icon name="FileSearch" size={48} className="mx-auto mb-2 opacity-20" />
@@ -120,7 +189,9 @@ const LinkFindingLogs = () => {
           </div>
         ) : (
           <div className="space-y-2 max-h-[600px] overflow-y-auto">
-            {logs.map((log) => (
+            {logs
+              .filter(log => statusFilter === 'all' || log.status === statusFilter)
+              .map((log) => (
               <div
                 key={log.id}
                 className="p-3 border rounded-lg hover:bg-gray-50 transition-colors"
