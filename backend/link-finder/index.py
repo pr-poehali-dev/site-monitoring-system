@@ -52,11 +52,24 @@ def parse_document_references(text: str) -> list:
     # Ключевые фразы, указывающие на связь с предыдущей версией
     context_keywords = [
         r'утратившим\s+силу',
+        r'утрачива[ею]т\s+силу',  # утрачивает, утрачивают
+        r'считать\s+утратившим',
         r'признать\s+утратившим',
         r'внести\s+изменени[яе]',
+        r'внесены\s+изменения',
+        r'вносятся\s+изменения',
+        r'с\s+изменениями,\s+внесенными',
         r'дополнить',
+        r'дополняется',
+        r'дополнен',
         r'изложить\s+в\s+новой\s+редакции',
         r'в\s+редакции\s+постановлени',  # Для списков вида "(в редакции постановлений ... от DATE №NUM, от DATE №NUM)"
+        r'действует\s+в\s+редакции',
+        r'отменить',
+        r'отменяется',
+        r'отменен',
+        r'заменить',
+        r'исключить',
     ]
     
     # Ищем абзацы/предложения с ключевыми фразами
@@ -74,23 +87,41 @@ def parse_document_references(text: str) -> list:
             
             # В этом контексте ищем все упоминания документов
             
-            # Паттерн 1: "от DATE года №NUM"
-            pattern_reverse = r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+(?:№|N|#)\s*(\d+)'
-            for match in re.finditer(pattern_reverse, context_text, re.IGNORECASE):
-                try:
-                    date_str = match.group(1)
-                    number = match.group(2)
-                    date_obj = datetime.strptime(date_str, '%d.%m.%Y')
-                    date_formatted = date_obj.strftime('%Y-%m-%d')
-                    references.append({'number': number, 'date': date_formatted})
-                except:
-                    continue
+            # Паттерн 1: "от DATE года №NUM" (включая варианты с N, #, без символа)
+            patterns_reverse = [
+                r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+№\s*(\d+)',
+                r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+N\s*(\d+)',
+                r'от\s+(\d{2}\.\d{2}\.\d{4})\s+года?\s+#\s*(\d+)',
+            ]
+            
+            for pattern_reverse in patterns_reverse:
+                for match in re.finditer(pattern_reverse, context_text, re.IGNORECASE):
+                    try:
+                        date_str = match.group(1)
+                        number = match.group(2)
+                        
+                        # Фильтр: номер не должен быть слишком длинным (не больше 5 цифр)
+                        if len(number) > 5:
+                            continue
+                        
+                        date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+                        # Фильтр: год должен быть в разумных пределах (1990 - текущий год + 1)
+                        current_year = datetime.now().year
+                        if not (1990 <= date_obj.year <= current_year + 1):
+                            continue
+                        
+                        date_formatted = date_obj.strftime('%Y-%m-%d')
+                        references.append({'number': number, 'date': date_formatted})
+                    except:
+                        continue
             
             # Паттерн 2: "постановление №NUM от DATE"
             patterns_direct = [
-                r'постановлени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-                r'постановлени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{2,4})',
-                r'распоряжени[ея]\s+(?:№|N|#)?\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+                r'постановлени[ея]\s+№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+                r'постановлени[ея]\s+N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+                r'постановлени[ея]\s+#\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+                r'распоряжени[ея]\s+№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.d{4})',
+                r'распоряжени[ея]\s+N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
             ]
             
             for pattern in patterns_direct:
@@ -98,26 +129,47 @@ def parse_document_references(text: str) -> list:
                     try:
                         number = match.group(1)
                         date_str = match.group(2)
-                        if len(date_str.split('.')[-1]) == 2:
-                            date_obj = datetime.strptime(date_str, '%d.%m.%y')
-                        else:
-                            date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+                        
+                        # Фильтр: номер не должен быть слишком длинным
+                        if len(number) > 5:
+                            continue
+                        
+                        date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+                        current_year = datetime.now().year
+                        if not (1990 <= date_obj.year <= current_year + 1):
+                            continue
+                        
                         date_formatted = date_obj.strftime('%Y-%m-%d')
                         references.append({'number': number, 'date': date_formatted})
                     except:
                         continue
             
-            # Паттерн 3: "№NUM от DATE"
-            pattern_simple = r'(?:№|N|#)\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})'
-            for match in re.finditer(pattern_simple, context_text, re.IGNORECASE):
-                try:
-                    number = match.group(1)
-                    date_str = match.group(2)
-                    date_obj = datetime.strptime(date_str, '%d.%m.%Y')
-                    date_formatted = date_obj.strftime('%Y-%m-%d')
-                    references.append({'number': number, 'date': date_formatted})
-                except:
-                    continue
+            # Паттерн 3: "№NUM от DATE" (простой формат)
+            patterns_simple = [
+                r'№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+                r'N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+                r'#\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+            ]
+            
+            for pattern_simple in patterns_simple:
+                for match in re.finditer(pattern_simple, context_text, re.IGNORECASE):
+                    try:
+                        number = match.group(1)
+                        date_str = match.group(2)
+                        
+                        # Фильтр: номер не должен быть слишком длинным
+                        if len(number) > 5:
+                            continue
+                        
+                        date_obj = datetime.strptime(date_str, '%d.%m.%Y')
+                        current_year = datetime.now().year
+                        if not (1990 <= date_obj.year <= current_year + 1):
+                            continue
+                        
+                        date_formatted = date_obj.strftime('%Y-%m-%d')
+                        references.append({'number': number, 'date': date_formatted})
+                    except:
+                        continue
     
     # Убираем дубликаты
     unique_refs = []

@@ -34,7 +34,7 @@ export const useMonitoringState = () => {
     try {
       const [statsData, docsData, changesData, logsData, settingsData] = await Promise.all([
         apiClient.getStats(),
-        apiClient.getDocuments({ limit: 100 }),
+        apiClient.getDocuments({ limit: 100, sort_by: 'document_date', sort_order: 'DESC' }),
         apiClient.getChanges(50),
         apiClient.getLogs(50),
         apiClient.getSettings()
