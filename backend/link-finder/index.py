@@ -328,14 +328,23 @@ def handler(event: dict, context) -> dict:
                     target_doc = cursor.fetchone()
                     
                     if target_doc:
+                        # Используем новую таблицу document_relations вместо related_to
                         cursor.execute(f"""
-                            UPDATE {schema}.documents
-                            SET related_to = %s
-                            WHERE id = %s AND related_to IS NULL
-                        """, (target_doc['id'], doc['id']))
+                            INSERT INTO {schema}.document_relations 
+                            (source_document_id, target_document_id, relation_type)
+                            VALUES (%s, %s, 'previous_version')
+                            ON CONFLICT (source_document_id, target_document_id) DO NOTHING
+                        """, (doc['id'], target_doc['id']))
                         
                         if cursor.rowcount > 0:
                             links_created += 1
+                            
+                            # Обновляем related_to для обратной совместимости (первая найденная связь)
+                            cursor.execute(f"""
+                                UPDATE {schema}.documents
+                                SET related_to = %s
+                                WHERE id = %s AND related_to IS NULL
+                            """, (target_doc['id'], doc['id']))
                             
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
@@ -376,10 +385,18 @@ def handler(event: dict, context) -> dict:
                             phantom_id = cursor.fetchone()['id']
                             phantom_created += 1
                             
+                            # Добавляем в document_relations
+                            cursor.execute(f"""
+                                INSERT INTO {schema}.document_relations 
+                                (source_document_id, target_document_id, relation_type)
+                                VALUES (%s, %s, 'previous_version')
+                            """, (doc['id'], phantom_id))
+                            
+                            # Обновляем related_to для обратной совместимости
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_to = %s
-                                WHERE id = %s
+                                WHERE id = %s AND related_to IS NULL
                             """, (phantom_id, doc['id']))
                             
                             cursor.execute(f"""
@@ -387,6 +404,22 @@ def handler(event: dict, context) -> dict:
                                 SET related_count = related_count + 1
                                 WHERE id = %s
                             """, (phantom_id,))
+                        else:
+                            # Фантом уже существует, добавляем связь
+                            cursor.execute(f"""
+                                INSERT INTO {schema}.document_relations 
+                                (source_document_id, target_document_id, relation_type)
+                                VALUES (%s, %s, 'previous_version')
+                                ON CONFLICT (source_document_id, target_document_id) DO NOTHING
+                            """, (doc['id'], existing_phantom['id']))
+                            
+                            if cursor.rowcount > 0:
+                                links_created += 1
+                                cursor.execute(f"""
+                                    UPDATE {schema}.documents
+                                    SET related_count = related_count + 1
+                                    WHERE id = %s
+                                """, (existing_phantom['id'],))
                 
                 conn.commit()
                 

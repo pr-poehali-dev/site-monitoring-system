@@ -104,11 +104,11 @@ export const useMonitoringState = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, selectedSection, selectedYear, onlyActual]);
+  }, [searchQuery, selectedSection, selectedYear, onlyActual, onlyReal]);
 
   useEffect(() => {
     loadDocuments();
-  }, [searchQuery, selectedSection, selectedYear, onlyActual, sortBy, sortOrder, page]);
+  }, [searchQuery, selectedSection, selectedYear, onlyActual, onlyReal, sortBy, sortOrder, page]);
 
   useEffect(() => {
     loadChanges();
