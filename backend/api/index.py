@@ -670,12 +670,13 @@ def get_document_versions(cursor, schema: str, document_id: int) -> dict:
     root_id = current_doc['related_to'] if current_doc['related_to'] else document_id
     
     # Получаем ВСЕ документы в цепочке версий (оригинал + все изменения)
+    # Сортируем по самой свежей доступной дате (document_date → published_date → created_at)
     cursor.execute(f"""
         SELECT id, title, url, section, published_date, document_date, document_number,
                file_size, file_cdn_url, created_at, related_to, is_actual, related_count
         FROM {schema}.documents
         WHERE id = %s OR related_to = %s
-        ORDER BY document_date DESC, created_at DESC
+        ORDER BY COALESCE(document_date, published_date, created_at) DESC, created_at DESC
     """, (root_id, root_id))
     all_docs = cursor.fetchall()
     
