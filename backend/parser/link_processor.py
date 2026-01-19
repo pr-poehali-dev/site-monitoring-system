@@ -133,16 +133,18 @@ def process_single_document(cursor, conn, schema: str, session_id: str, doc: dic
     
     for mention in mentions:
         mention_type, keywords = classify_mention(mention['context'])
+        
+        mention['type'] = mention_type
+        mention['keywords'] = keywords
+        classified_mentions.append(mention)
+        
+        # Считаем только не-внешние упоминания
         if mention_type == 'VERSION':
             version_keywords.update(keywords)
             stats['version_mentions'] += 1
         elif mention_type == 'RELATED':
             related_keywords.update(keywords)
             stats['related_mentions'] += 1
-        
-        mention['type'] = mention_type
-        mention['keywords'] = keywords
-        classified_mentions.append(mention)
     
     file_result['stages']['mentions'] = {
         'status': 'success',
