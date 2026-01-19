@@ -223,26 +223,32 @@ def handler(event: dict, context) -> dict:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("SELECT current_schema()")
-        schema = cursor.fetchone()['current_schema']
+        schema_result = cursor.fetchone()
+        if not schema_result:
+            schema = 'public'
+        else:
+            schema = schema_result['current_schema']
         
         if batch_mode:
-            cursor.execute(f"""
-                SELECT id, document_number, document_date, file_cdn_url, title, section
+            query = f"""
+                SELECT id, document_number, document_date, file_cdn_url, title, section, 
+                       published_date, created_at
                 FROM {schema}.documents d
                 WHERE file_cdn_url IS NOT NULL
                   AND related_to IS NULL
                   AND related_count = 0
-                  AND is_phantom = FALSE
+                  AND (is_phantom IS NULL OR is_phantom = FALSE)
                   AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.pdf')
                   AND NOT EXISTS (
                       SELECT 1 FROM {schema}.link_finding_logs lfl 
                       WHERE lfl.document_id = d.id
                   )
                 ORDER BY 
-                    COALESCE(document_date, published_date, created_at) DESC,
-                    id DESC
-                LIMIT %s
-            """, (limit,))
+                    COALESCE(d.document_date, d.published_date, d.created_at) DESC,
+                    d.id DESC
+                LIMIT {limit}
+            """
+            cursor.execute(query)
         else:
             if not document_id:
                 return {
@@ -261,9 +267,9 @@ def handler(event: dict, context) -> dict:
         
         if not documents:
             return {
-                'statusCode': 404,
+                'statusCode': 200,
                 'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'Documents not found'})
+                'body': json.dumps({'processed': 0, 'results': []})
             }
         
         results = []
@@ -481,8 +487,10 @@ def handler(event: dict, context) -> dict:
         }
         
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-            'body': json.dumps({'error': str(e)})
+            'body': json.dumps({'error': str(e), 'trace': error_trace})
         }
