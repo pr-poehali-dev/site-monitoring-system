@@ -93,15 +93,6 @@ def parse_document_references(text: str) -> list:
                 end_pos = min(len(text), keyword_match.end() + 300)
             context_text = text[start_pos:end_pos]
             
-            # Пропускаем контекст если он относится к другому уровню власти
-            skip_context = False
-            for exclusion in exclusion_phrases:
-                if re.search(exclusion, context_text, re.IGNORECASE):
-                    skip_context = True
-                    break
-            if skip_context:
-                continue
-            
             # В этом контексте ищем все упоминания документов
             
             # Паттерн 1: "от DATE года №NUM" (включая варианты с N, #, без символа)
@@ -119,6 +110,21 @@ def parse_document_references(text: str) -> list:
                         
                         # Фильтр: номер не должен быть слишком длинным (не больше 5 цифр)
                         if len(number) > 5:
+                            continue
+                        
+                        # Проверяем предложение вокруг найденного документа (±80 символов)
+                        match_start_in_context = match.start()
+                        sentence_start = max(0, match_start_in_context - 80)
+                        sentence_end = min(len(context_text), match_start_in_context + match.end() - match.start() + 80)
+                        sentence = context_text[sentence_start:sentence_end]
+                        
+                        # Пропускаем если в предложении упоминается другой уровень власти
+                        skip_reference = False
+                        for exclusion in exclusion_phrases:
+                            if re.search(exclusion, sentence, re.IGNORECASE):
+                                skip_reference = True
+                                break
+                        if skip_reference:
                             continue
                         
                         date_obj = datetime.strptime(date_str, '%d.%m.%Y')
@@ -151,6 +157,20 @@ def parse_document_references(text: str) -> list:
                         if len(number) > 5:
                             continue
                         
+                        # Проверяем предложение вокруг найденного документа
+                        match_start_in_context = match.start()
+                        sentence_start = max(0, match_start_in_context - 80)
+                        sentence_end = min(len(context_text), match_start_in_context + match.end() - match.start() + 80)
+                        sentence = context_text[sentence_start:sentence_end]
+                        
+                        skip_reference = False
+                        for exclusion in exclusion_phrases:
+                            if re.search(exclusion, sentence, re.IGNORECASE):
+                                skip_reference = True
+                                break
+                        if skip_reference:
+                            continue
+                        
                         date_obj = datetime.strptime(date_str, '%d.%m.%Y')
                         current_year = datetime.now().year
                         if not (1990 <= date_obj.year <= current_year + 1):
@@ -176,6 +196,20 @@ def parse_document_references(text: str) -> list:
                         
                         # Фильтр: номер не должен быть слишком длинным
                         if len(number) > 5:
+                            continue
+                        
+                        # Проверяем предложение вокруг найденного документа
+                        match_start_in_context = match.start()
+                        sentence_start = max(0, match_start_in_context - 80)
+                        sentence_end = min(len(context_text), match_start_in_context + match.end() - match.start() + 80)
+                        sentence = context_text[sentence_start:sentence_end]
+                        
+                        skip_reference = False
+                        for exclusion in exclusion_phrases:
+                            if re.search(exclusion, sentence, re.IGNORECASE):
+                                skip_reference = True
+                                break
+                        if skip_reference:
                             continue
                         
                         date_obj = datetime.strptime(date_str, '%d.%m.%Y')
