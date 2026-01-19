@@ -31,6 +31,7 @@ const LinkFinderPanel = () => {
   const [total, setTotal] = useState(0);
   const [linksCreated, setLinksCreated] = useState(0);
   const [currentBatch, setCurrentBatch] = useState<LinkFinderResult[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
   const shouldStopRef = useRef(false);
 
   const getTotalDocuments = async () => {
@@ -42,6 +43,16 @@ const LinkFinderPanel = () => {
     } catch (error) {
       console.error('Error getting total:', error);
       return 0;
+    }
+  };
+
+  const loadLogs = async () => {
+    try {
+      const response = await fetch(`${API_URL}?endpoint=link_finding_logs&limit=50`);
+      const data = await response.json();
+      setLogs(data.logs || []);
+    } catch (error) {
+      console.error('Error loading logs:', error);
     }
   };
 
@@ -132,6 +143,19 @@ const LinkFinderPanel = () => {
       setProgress(newProgress);
     }
   }, [processed, total, isRunning]);
+
+  useEffect(() => {
+    loadLogs();
+    const interval = setInterval(loadLogs, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (isRunning) {
+      const interval = setInterval(loadLogs, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [isRunning]);
 
   return (
     <Card>
@@ -252,6 +276,50 @@ const LinkFinderPanel = () => {
               <span className="text-sm font-medium text-green-900">
                 Готово! Обработано {processed} документов, создано {linksCreated} связей
               </span>
+            </div>
+          </div>
+        )}
+
+        {logs.length > 0 && (
+          <div className="space-y-2 pt-4 border-t">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-gray-700">История поиска связей</p>
+              <span className="text-xs text-gray-500">{logs.length} записей</span>
+            </div>
+            <div className="max-h-64 overflow-y-auto space-y-2">
+              {logs.slice(0, 20).map((log: any) => (
+                <div key={log.id} className="text-xs p-3 bg-white border rounded space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-gray-600 truncate flex-1 mr-2">
+                      №{log.document_number}
+                    </span>
+                    <span className={
+                      log.status === 'success' ? 'text-green-600 font-semibold' :
+                      log.status === 'no_references' ? 'text-gray-400' :
+                      'text-red-600'
+                    }>
+                      {log.status === 'success' && `✓ ${log.links_created}`}
+                      {log.status === 'no_references' && '∅'}
+                      {log.status === 'error' && '✗'}
+                    </span>
+                  </div>
+                  {log.references_found > 0 && (
+                    <div className="text-[10px] text-gray-600">
+                      Найдено: {log.references_found}
+                    </div>
+                  )}
+                  {log.not_found_refs && (
+                    <div className="text-[10px] text-orange-600 truncate">
+                      Не найдено: {log.not_found_refs}
+                    </div>
+                  )}
+                  {log.message && (
+                    <div className="text-[10px] text-gray-500 truncate">
+                      {log.message}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}

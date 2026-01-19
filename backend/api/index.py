@@ -332,6 +332,7 @@ def get_stats(cursor, schema: str) -> dict:
           AND related_to IS NULL
           AND related_count = 0
           AND is_phantom = FALSE
+          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.pdf')
           AND NOT EXISTS (
               SELECT 1 FROM {schema}.link_finding_logs lfl 
               WHERE lfl.document_id = d.id
