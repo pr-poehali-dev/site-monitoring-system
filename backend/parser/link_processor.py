@@ -1,10 +1,29 @@
 """Обработка одного документа для поиска связей"""
 import time
+import sys
+import os
 from typing import Dict
-from link_parser import download_file, parse_docx, parse_pdf
-from link_patterns import extract_mentions, classify_mention, is_external_document
-from link_db import (log_step, find_document_in_db, create_phantom_document,
-                     check_existing_link, create_link, delete_link, get_existing_links)
+
+# Добавляем текущую директорию в путь для импорта локальных модулей
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import link_parser
+import link_patterns
+import link_db
+
+download_file = link_parser.download_file
+parse_docx = link_parser.parse_docx
+parse_pdf = link_parser.parse_pdf
+extract_mentions = link_patterns.extract_mentions
+classify_mention = link_patterns.classify_mention
+is_external_document = link_patterns.is_external_document
+log_step = link_db.log_step
+find_document_in_db = link_db.find_document_in_db
+create_phantom_document = link_db.create_phantom_document
+check_existing_link = link_db.check_existing_link
+create_link = link_db.create_link
+delete_link = link_db.delete_link
+get_existing_links = link_db.get_existing_links
 
 
 def process_single_document(cursor, conn, schema: str, session_id: str, doc: dict) -> dict:
