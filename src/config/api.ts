@@ -204,5 +204,16 @@ export const apiClient = {
     
     if (!response.ok) throw new Error('Failed to find document relations');
     return response.json();
+  },
+
+  async getDocumentVersions(documentId: number) {
+    const queryParams = new URLSearchParams({ 
+      endpoint: 'document_versions',
+      document_id: documentId.toString()
+    });
+    
+    const response = await fetch(`${API_BASE_URL}?${queryParams}`);
+    if (!response.ok) throw new Error('Failed to fetch document versions');
+    return response.json();
   }
 };

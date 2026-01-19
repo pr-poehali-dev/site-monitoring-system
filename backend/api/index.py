@@ -56,6 +56,11 @@ def handler(event: dict, context) -> dict:
                 result = get_analytics(cursor, schema)
             elif endpoint == 'file_download_stats':
                 result = get_file_download_stats(cursor, schema)
+            elif endpoint == 'document_versions':
+                document_id = query_params.get('document_id')
+                if not document_id:
+                    return error_response('document_id обязателен', 400)
+                result = get_document_versions(cursor, schema, int(document_id))
             else:
                 cursor.close()
                 conn.close()
@@ -641,6 +646,72 @@ def full_database_reset(cursor, schema: str) -> dict:
         'deleted_logs': logs_count,
         'deleted_state': state_count,
         'message': f'База данных полностью очищена. Удалено: {docs_count} документов, {changes_count} изменений, {files_count} файлов, {logs_count} логов'
+    }
+
+
+def get_document_versions(cursor, schema: str, document_id: int) -> dict:
+    """Получение всех версий документа (оригинал + все связанные)"""
+    
+    # Получаем сам документ
+    cursor.execute(f"""
+        SELECT id, title, url, section, published_date, document_date, document_number,
+               file_size, file_cdn_url, created_at, related_to, is_actual, related_count
+        FROM {schema}.documents
+        WHERE id = %s
+    """, (document_id,))
+    current_doc = cursor.fetchone()
+    
+    if not current_doc:
+        return {'error': 'Документ не найден', 'versions': []}
+    
+    # Определяем ID корневого документа (оригинала)
+    root_id = current_doc['related_to'] if current_doc['related_to'] else document_id
+    
+    # Получаем оригинальный документ
+    cursor.execute(f"""
+        SELECT id, title, url, section, published_date, document_date, document_number,
+               file_size, file_cdn_url, created_at, related_to, is_actual, related_count
+        FROM {schema}.documents
+        WHERE id = %s
+    """, (root_id,))
+    original = cursor.fetchone()
+    
+    # Получаем все версии (документы, которые ссылаются на оригинал)
+    cursor.execute(f"""
+        SELECT id, title, url, section, published_date, document_date, document_number,
+               file_size, file_cdn_url, created_at, related_to, is_actual, related_count
+        FROM {schema}.documents
+        WHERE related_to = %s
+        ORDER BY document_date DESC, created_at DESC
+    """, (root_id,))
+    versions = cursor.fetchall()
+    
+    # Получаем файлы для всех документов
+    all_ids = [original['id']] + [v['id'] for v in versions]
+    placeholders = ','.join(['%s'] * len(all_ids))
+    cursor.execute(f"""
+        SELECT document_id, file_url, file_type, file_name, file_size, file_cdn_url
+        FROM {schema}.document_files
+        WHERE document_id IN ({placeholders})
+        ORDER BY document_id, CASE WHEN file_type = 'main' THEN 0 ELSE 1 END
+    """, all_ids)
+    
+    files_by_doc = {}
+    for f in cursor.fetchall():
+        did = f['document_id']
+        if did not in files_by_doc:
+            files_by_doc[did] = []
+        files_by_doc[did].append(f)
+    
+    # Добавляем файлы к документам
+    original['files'] = files_by_doc.get(original['id'], [])
+    for v in versions:
+        v['files'] = files_by_doc.get(v['id'], [])
+    
+    return {
+        'original': original,
+        'versions': versions,
+        'total_versions': len(versions)
     }
 
 
