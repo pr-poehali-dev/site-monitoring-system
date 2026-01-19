@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/ui/icon';
 
-const API_BASE_URL = 'https://functions.poehali.dev/73bc5c25-0ee1-409f-89c6-2cf97269ec2d';
+const API_BASE_URL = 'https://functions.poehali.dev/0d1dbd15-7762-4fb3-af49-47c960f9828b';
 
 interface LinkFinderLogsProps {
   sessionId?: string | null;
