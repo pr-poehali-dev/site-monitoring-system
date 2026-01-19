@@ -126,6 +126,12 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 conn.close()
                 return success_response(result)
+            
+            elif action == 'find_relations':
+                result = find_document_relations(conn, schema)
+                conn.commit()
+                conn.close()
+                return success_response(result)
         
         conn.close()
         return error_response('Неподдерживаемый метод', 400)
@@ -1443,6 +1449,135 @@ def log_update(cursor, schema: str, lid: int, status: str, message: str, dur: in
         f"UPDATE {schema}.parsing_logs SET status = %s, message = %s, duration_ms = %s, finished_at = CURRENT_TIMESTAMP WHERE id = %s",
         (status, message, dur, lid)
     )
+
+
+def find_document_relations(conn, schema: str) -> dict:
+    """Поиск связей между документами (новый документ изменяет старый)"""
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    t_start = time.time()
+    log_create(cursor, schema, 'system', 'info', '🔗 ПОИСК СВЯЗЕЙ ДОКУМЕНТОВ: Анализ заголовков...')
+    conn.commit()
+    
+    # Паттерны для поиска связей в заголовках
+    patterns = [
+        r'О внесении изменений в постановление.*?от\s+(\d{2}\.\d{2}\.\d{4})\s*г?\.*\s*№\s*(\d+)',
+        r'О внесении изменений в постановление.*?№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+        r'О внесении изменений в распоряжение.*?от\s+(\d{2}\.\d{2}\.\d{4})\s*г?\.*\s*№\s*(\d+)',
+        r'О внесении изменений в распоряжение.*?№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
+        r'изменений в постановление.*?(\d{2}\.\d{2}\.\d{4}).*?№\s*(\d+)',
+        r'изменений в распоряжение.*?(\d{2}\.\d{2}\.\d{4}).*?№\s*(\d+)'
+    ]
+    
+    # Получаем все документы с упоминанием изменений в заголовке
+    cursor.execute(f"""
+        SELECT id, title, document_number, document_date, section
+        FROM {schema}.documents
+        WHERE (title ILIKE '%внесении изменений%' OR title ILIKE '%изменений в%')
+        AND related_to IS NULL
+        ORDER BY document_date DESC
+    """)
+    candidates = cursor.fetchall()
+    
+    found_relations = 0
+    not_found = []
+    
+    for doc in candidates:
+        found = False
+        
+        for pattern in patterns:
+            match = re.search(pattern, doc['title'], re.IGNORECASE)
+            if match:
+                # Извлекаем номер и дату из заголовка
+                groups = match.groups()
+                if len(groups) == 2:
+                    # Проверяем порядок: дата+номер или номер+дата
+                    if '.' in groups[0]:  # Первая группа - дата
+                        ref_date_str, ref_num = groups[0], groups[1]
+                    else:  # Первая группа - номер
+                        ref_num, ref_date_str = groups[0], groups[1]
+                    
+                    # Конвертируем дату в формат YYYY-MM-DD
+                    date_parts = ref_date_str.split('.')
+                    if len(date_parts) == 3:
+                        ref_date = f"{date_parts[2]}-{date_parts[1]}-{date_parts[0]}"
+                        
+                        # Ищем документ с таким номером и датой
+                        cursor.execute(f"""
+                            SELECT id, title
+                            FROM {schema}.documents
+                            WHERE document_number = %s 
+                            AND document_date = %s
+                            AND section = %s
+                            AND id != %s
+                            LIMIT 1
+                        """, (ref_num, ref_date, doc['section'], doc['id']))
+                        
+                        original_doc = cursor.fetchone()
+                        
+                        if original_doc:
+                            # Устанавливаем связь
+                            cursor.execute(f"""
+                                UPDATE {schema}.documents
+                                SET related_to = %s
+                                WHERE id = %s
+                            """, (original_doc['id'], doc['id']))
+                            
+                            # Помечаем оригинальный документ как неактуальный
+                            cursor.execute(f"""
+                                UPDATE {schema}.documents
+                                SET is_actual = FALSE
+                                WHERE id = %s
+                            """, (original_doc['id'],))
+                            
+                            found_relations += 1
+                            found = True
+                            log_create(cursor, schema, 'system', 'success', 
+                                f'✅ Связь найдена: {doc["title"][:80]}... → №{ref_num} от {ref_date_str}')
+                            conn.commit()
+                            break
+        
+        if not found:
+            not_found.append(doc['title'][:100])
+    
+    # Пересчитываем количество версий для всех документов
+    cursor.execute(f"""
+        UPDATE {schema}.documents d
+        SET related_count = (
+            SELECT COUNT(*)
+            FROM {schema}.documents d2
+            WHERE d2.related_to = d.id
+        )
+        WHERE id IN (
+            SELECT DISTINCT related_to
+            FROM {schema}.documents
+            WHERE related_to IS NOT NULL
+        )
+    """)
+    conn.commit()
+    
+    duration_ms = int((time.time() - t_start) * 1000)
+    
+    summary = f"""🔗 ПОИСК СВЯЗЕЙ ЗАВЕРШЁН
+
+✅ Найдено связей: {found_relations}
+❌ Не найдено: {len(not_found)}
+⏱ Время: {duration_ms}мс
+
+Проверено документов: {len(candidates)}"""
+    
+    log_create(cursor, schema, 'system', 'success', summary)
+    conn.commit()
+    
+    cursor.close()
+    return {
+        'status': 'completed',
+        'found_relations': found_relations,
+        'not_found_count': len(not_found),
+        'not_found_samples': not_found[:10],
+        'total_checked': len(candidates),
+        'duration_ms': duration_ms
+    }
 
 
 def cors_response():

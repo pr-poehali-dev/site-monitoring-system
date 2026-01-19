@@ -69,6 +69,8 @@ const Index = () => {
               setSelectedSection={state.setSelectedSection}
               selectedYear={state.selectedYear}
               setSelectedYear={state.setSelectedYear}
+              onlyActual={state.onlyActual}
+              setOnlyActual={state.setOnlyActual}
               years={state.years}
               sortBy={state.sortBy}
               sortOrder={state.sortOrder}
@@ -123,6 +125,7 @@ const Index = () => {
               handleCleanLogs={actions.handleCleanLogs}
               handleFullReset={actions.handleFullReset}
               handleResetStuck={actions.handleResetStuck}
+              handleFindRelations={actions.handleFindRelations}
               loading={state.loading}
             />
           </TabsContent>

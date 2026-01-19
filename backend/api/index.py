@@ -115,6 +115,7 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
     search = params.get('search', '')
     section = params.get('section', '')
     year = params.get('year', '')
+    only_actual = params.get('only_actual', '')
     sort_by = params.get('sort_by', 'created_at')
     sort_order = params.get('sort_order', 'DESC')
     limit = int(params.get('limit', '100'))
@@ -135,6 +136,9 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
         where_clauses.append("EXTRACT(YEAR FROM COALESCE(document_date, published_date, created_at)) = %s")
         query_params.append(int(year))
     
+    if only_actual and only_actual.lower() == 'true':
+        where_clauses.append("is_actual = TRUE")
+    
     where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
     
     allowed_sorts = ['created_at', 'document_date', 'published_date', 'title', 'changes_count', 'file_size']
@@ -147,7 +151,8 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
     
     cursor.execute(f"""
         SELECT id, title, url, section, published_date, document_date, document_number, 
-               file_size, file_cdn_url, changes_count, last_checked_at, created_at
+               file_size, file_cdn_url, changes_count, last_checked_at, created_at,
+               related_to, is_actual, related_count
         FROM {schema}.documents
         WHERE {where_sql}
         {order_sql}

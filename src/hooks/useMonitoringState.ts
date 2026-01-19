@@ -5,6 +5,7 @@ export const useMonitoringState = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSection, setSelectedSection] = useState('all');
   const [selectedYear, setSelectedYear] = useState('all');
+  const [onlyActual, setOnlyActual] = useState(false);
   const [sortBy, setSortBy] = useState('published_date');
   const [sortOrder, setSortOrder] = useState('DESC');
   const [documents, setDocuments] = useState<any[]>([]);
@@ -59,6 +60,7 @@ export const useMonitoringState = () => {
       if (searchQuery) params.search = searchQuery;
       if (selectedSection !== 'all') params.section = selectedSection;
       if (selectedYear !== 'all') params.year = selectedYear;
+      if (onlyActual) params.only_actual = 'true';
       params.sort_by = sortBy;
       params.sort_order = sortOrder;
 
@@ -100,11 +102,11 @@ export const useMonitoringState = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, selectedSection, selectedYear]);
+  }, [searchQuery, selectedSection, selectedYear, onlyActual]);
 
   useEffect(() => {
     loadDocuments();
-  }, [searchQuery, selectedSection, selectedYear, sortBy, sortOrder, page]);
+  }, [searchQuery, selectedSection, selectedYear, onlyActual, sortBy, sortOrder, page]);
 
   useEffect(() => {
     loadChanges();
@@ -136,6 +138,8 @@ export const useMonitoringState = () => {
     setSelectedSection,
     selectedYear,
     setSelectedYear,
+    onlyActual,
+    setOnlyActual,
     sortBy,
     setSortBy,
     sortOrder,

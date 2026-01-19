@@ -284,6 +284,35 @@ export const useMonitoringActions = ({
     }
   };
 
+  const handleFindRelations = async () => {
+    setLoading(true);
+    setActiveTab('logs');
+    setAutoRefreshLogs(true);
+    
+    try {
+      const result = await apiClient.findDocumentRelations();
+      
+      toast({
+        title: '🔗 Поиск связей завершён',
+        description: `Найдено: ${result.found_relations}, Не найдено: ${result.not_found_count}`
+      });
+
+      setTimeout(() => {
+        loadAllData();
+        setAutoRefreshLogs(false);
+      }, 2000);
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось найти связи',
+        variant: 'destructive'
+      });
+      setAutoRefreshLogs(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatFileSize = (bytes: number) => {
     if (!bytes) return '-';
     const kb = bytes / 1024;
@@ -333,6 +362,7 @@ export const useMonitoringActions = ({
     handleCleanLogs,
     handleFullReset,
     handleResetStuck,
+    handleFindRelations,
     formatFileSize,
     formatDate,
     formatDateTime,

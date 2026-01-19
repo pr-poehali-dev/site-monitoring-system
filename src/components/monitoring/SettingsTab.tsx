@@ -18,6 +18,7 @@ interface SettingsTabProps {
   handleCleanLogs: () => void;
   handleFullReset: () => void;
   handleResetStuck: () => void;
+  handleFindRelations: () => void;
   loading: boolean;
 }
 
@@ -31,6 +32,7 @@ const SettingsTab = ({
   handleCleanLogs,
   handleFullReset,
   handleResetStuck,
+  handleFindRelations,
   loading
 }: SettingsTabProps) => {
   return (
@@ -101,15 +103,25 @@ const SettingsTab = ({
             </Button>
           </div>
           
-          <Button 
-            variant="outline" 
-            className="w-full"
-            onClick={handleResetStuck}
-            disabled={loading}
-          >
-            <Icon name="Wrench" size={16} className="mr-2" />
-            Сбросить застрявшие задачи
-          </Button>
+          <div className="grid grid-cols-2 gap-3">
+            <Button 
+              variant="outline" 
+              onClick={handleResetStuck}
+              disabled={loading}
+            >
+              <Icon name="Wrench" size={16} className="mr-2" />
+              Сбросить зависшие
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              onClick={handleFindRelations}
+              disabled={loading}
+            >
+              <Icon name="Link" size={16} className="mr-2" />
+              Найти связи
+            </Button>
+          </div>
 
           <Button 
             variant="destructive" 

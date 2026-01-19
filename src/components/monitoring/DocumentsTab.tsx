@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
 
 interface DocumentsTabProps {
@@ -14,6 +16,8 @@ interface DocumentsTabProps {
   setSelectedSection: (value: string) => void;
   selectedYear: string;
   setSelectedYear: (value: string) => void;
+  onlyActual: boolean;
+  setOnlyActual: (value: boolean) => void;
   years: string[];
   sortBy: string;
   sortOrder: string;
@@ -37,6 +41,8 @@ const DocumentsTab = ({
   setSelectedSection,
   selectedYear,
   setSelectedYear,
+  onlyActual,
+  setOnlyActual,
   years,
   sortBy,
   sortOrder,
@@ -90,6 +96,16 @@ const DocumentsTab = ({
               ))}
             </SelectContent>
           </Select>
+          <div className="flex items-center space-x-2">
+            <Checkbox 
+              id="only-actual" 
+              checked={onlyActual}
+              onCheckedChange={setOnlyActual}
+            />
+            <Label htmlFor="only-actual" className="text-sm font-normal cursor-pointer">
+              Только актуальные
+            </Label>
+          </div>
         </div>
 
         <div className="border rounded-lg overflow-x-auto">
@@ -127,6 +143,7 @@ const DocumentsTab = ({
                 >
                   Изменений {getSortIcon('changes_count')}
                 </TableHead>
+                <TableHead className="text-center">Версии</TableHead>
                 <TableHead className="text-right">Файл</TableHead>
               </TableRow>
             </TableHeader>
@@ -165,6 +182,34 @@ const DocumentsTab = ({
                       </Badge>
                     ) : (
                       <span className="text-gray-400 text-xs">0</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {doc.related_count > 0 ? (
+                      <a 
+                        href={`/versions/${doc.id}`}
+                        className="inline-block"
+                        title={`${doc.related_count} версий документа`}
+                      >
+                        <Badge 
+                          variant="default"
+                          className="text-xs cursor-pointer hover:bg-primary/80 transition-colors"
+                        >
+                          {doc.related_count}
+                        </Badge>
+                      </a>
+                    ) : doc.related_to ? (
+                      <a 
+                        href={`/versions/${doc.related_to}`}
+                        className="inline-block"
+                        title="Версия документа"
+                      >
+                        <Badge variant="secondary" className="text-xs cursor-pointer hover:bg-secondary/80">
+                          ↑
+                        </Badge>
+                      </a>
+                    ) : (
+                      <span className="text-gray-400 text-xs">-</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right">

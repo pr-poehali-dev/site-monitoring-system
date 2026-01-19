@@ -191,5 +191,18 @@ export const apiClient = {
     
     if (!response.ok) throw new Error('Failed to reset stuck tasks');
     return response.json();
+  },
+
+  async findDocumentRelations() {
+    const response = await fetch(PARSER_BASE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'find_relations'
+      })
+    });
+    
+    if (!response.ok) throw new Error('Failed to find document relations');
+    return response.json();
   }
 };
