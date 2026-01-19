@@ -1,0 +1,8 @@
+[
+  {
+    "name": "Analyze DOCX file",
+    "request": {
+      "method": "GET"
+    }
+  }
+]
