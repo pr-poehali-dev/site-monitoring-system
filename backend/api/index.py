@@ -142,7 +142,9 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
         query_params.append(int(year))
     
     if only_actual and only_actual.lower() == 'true':
-        where_clauses.append("is_actual = TRUE")
+        # Показываем только документы, у которых нет более новых версий
+        # (т.е. на них никто не ссылается через related_to)
+        where_clauses.append("related_count = 0")
     
     where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
     
@@ -650,7 +652,7 @@ def full_database_reset(cursor, schema: str) -> dict:
 
 
 def get_document_versions(cursor, schema: str, document_id: int) -> dict:
-    """Получение всех версий документа (оригинал + все связанные)"""
+    """Получение всех версий документа (актуальный + предыдущие версии)"""
     
     # Получаем сам документ
     cursor.execute(f"""
@@ -667,27 +669,26 @@ def get_document_versions(cursor, schema: str, document_id: int) -> dict:
     # Определяем ID корневого документа (оригинала)
     root_id = current_doc['related_to'] if current_doc['related_to'] else document_id
     
-    # Получаем оригинальный документ
+    # Получаем ВСЕ документы в цепочке версий (оригинал + все изменения)
     cursor.execute(f"""
         SELECT id, title, url, section, published_date, document_date, document_number,
                file_size, file_cdn_url, created_at, related_to, is_actual, related_count
         FROM {schema}.documents
-        WHERE id = %s
-    """, (root_id,))
-    original = cursor.fetchone()
-    
-    # Получаем все версии (документы, которые ссылаются на оригинал)
-    cursor.execute(f"""
-        SELECT id, title, url, section, published_date, document_date, document_number,
-               file_size, file_cdn_url, created_at, related_to, is_actual, related_count
-        FROM {schema}.documents
-        WHERE related_to = %s
+        WHERE id = %s OR related_to = %s
         ORDER BY document_date DESC, created_at DESC
-    """, (root_id,))
-    versions = cursor.fetchall()
+    """, (root_id, root_id))
+    all_docs = cursor.fetchall()
+    
+    if not all_docs:
+        return {'error': 'Документы не найдены', 'versions': []}
+    
+    # Первый документ в списке (самый новый) - это актуальная версия
+    latest = all_docs[0]
+    # Остальные - предыдущие версии
+    previous_versions = all_docs[1:]
     
     # Получаем файлы для всех документов
-    all_ids = [original['id']] + [v['id'] for v in versions]
+    all_ids = [d['id'] for d in all_docs]
     placeholders = ','.join(['%s'] * len(all_ids))
     cursor.execute(f"""
         SELECT document_id, file_url, file_type, file_name, file_size, file_cdn_url
@@ -704,14 +705,14 @@ def get_document_versions(cursor, schema: str, document_id: int) -> dict:
         files_by_doc[did].append(f)
     
     # Добавляем файлы к документам
-    original['files'] = files_by_doc.get(original['id'], [])
-    for v in versions:
+    latest['files'] = files_by_doc.get(latest['id'], [])
+    for v in previous_versions:
         v['files'] = files_by_doc.get(v['id'], [])
     
     return {
-        'original': original,
-        'versions': versions,
-        'total_versions': len(versions)
+        'latest': latest,
+        'versions': previous_versions,
+        'total_versions': len(all_docs)
     }
 
 

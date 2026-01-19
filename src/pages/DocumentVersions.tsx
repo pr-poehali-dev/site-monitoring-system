@@ -77,7 +77,7 @@ const DocumentVersions = () => {
     );
   }
 
-  const { original, versions, total_versions } = data;
+  const { latest, versions, total_versions } = data;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -97,7 +97,7 @@ const DocumentVersions = () => {
               <div className="flex-1">
                 <CardTitle className="text-xl mb-2">Версии документа</CardTitle>
                 <CardDescription>
-                  Оригинальный документ и все его изменения
+                  Актуальная версия и история изменений
                 </CardDescription>
               </div>
               <Badge variant="secondary" className="text-sm">
@@ -106,28 +106,28 @@ const DocumentVersions = () => {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
               <div className="flex items-start gap-3">
-                <Icon name="FileText" size={20} className="text-blue-600 mt-0.5" />
+                <Icon name="CheckCircle2" size={20} className="text-green-600 mt-0.5" />
                 <div className="flex-1">
-                  <div className="font-semibold text-blue-900 mb-1">
-                    Оригинальный документ {!original.is_actual && <Badge variant="secondary" className="ml-2 text-xs">Изменён</Badge>}
+                  <div className="font-semibold text-green-900 mb-1">
+                    Актуальная версия <Badge variant="default" className="ml-2 text-xs bg-green-600">Действует</Badge>
                   </div>
-                  <div className="text-sm text-blue-800 mb-2">{original.title}</div>
-                  <div className="flex gap-4 text-xs text-blue-700">
+                  <div className="text-sm text-green-800 mb-2">{latest.title}</div>
+                  <div className="flex gap-4 text-xs text-green-700">
                     <div>
-                      <span className="font-medium">Номер:</span> {original.document_number || '-'}
+                      <span className="font-medium">Номер:</span> {latest.document_number || '-'}
                     </div>
                     <div>
-                      <span className="font-medium">Дата:</span> {formatDate(original.document_date)}
+                      <span className="font-medium">Дата:</span> {formatDate(latest.document_date)}
                     </div>
                     <div>
-                      <span className="font-medium">Раздел:</span> {original.section}
+                      <span className="font-medium">Раздел:</span> {latest.section}
                     </div>
                   </div>
-                  {original.files && original.files.length > 0 && (
+                  {latest.files && latest.files.length > 0 && (
                     <div className="mt-3 flex gap-2">
-                      {original.files.map((file: any, idx: number) => (
+                      {latest.files.map((file: any, idx: number) => (
                         <Button 
                           key={idx} 
                           variant={file.file_type === 'main' ? 'default' : 'outline'} 
@@ -155,9 +155,9 @@ const DocumentVersions = () => {
         {versions.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle>История изменений</CardTitle>
+              <CardTitle>Предыдущие версии</CardTitle>
               <CardDescription>
-                Документы, вносящие изменения в оригинал (от новых к старым)
+                История изменений документа (от новых к старым)
               </CardDescription>
             </CardHeader>
             <CardContent>
