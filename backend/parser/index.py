@@ -1452,71 +1452,184 @@ def log_update(cursor, schema: str, lid: int, status: str, message: str, dur: in
 
 
 def find_document_relations(conn, schema: str) -> dict:
-    """Поиск связей между документами (встроенная логика v2.1 - версии + связанные)"""
+    """Поиск связей между документами через анализ файлов (полная логика из link-finder)"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     t_start = time.time()
-    log_create(cursor, schema, 'system', 'info', '🔗 ПОИСК СВЯЗЕЙ: Анализ содержимого документов (версии + связанные)...')
+    log_create(cursor, schema, 'system', 'info', '🔗 ПОИСК СВЯЗЕЙ: Полный анализ содержимого файлов (docx/doc/pdf)...')
     conn.commit()
     
-    # Сначала очистим старые данные для переобработки
-    log_create(cursor, schema, 'system', 'info', '🗑️ Очистка старых связей для переобработки...')
-    conn.commit()
+    # Константы для парсинга (из link-finder)
+    VERSION_KEYWORDS = [
+        r'утратившим\s+силу', r'утрачива[ею]т\s+силу', r'считать\s+утратившим',
+        r'признать\s+утратившим', r'внести\s+изменени[яе]', r'внесены\s+изменения',
+        r'вносятся\s+изменения', r'с\s+изменениями,\s+внесенными',
+        r'дополнить', r'дополняется', r'дополнен',
+        r'изложить\s+в\s+новой\s+редакции', r'в\s+редакции\s+постановлени',
+        r'действует\s+в\s+редакции', r'отменить', r'отменяется', r'отменен',
+        r'заменить', r'исключить'
+    ]
     
-    try:
-        cursor.execute(f"DELETE FROM {schema}.document_relations")
-        cursor.execute(f"DELETE FROM {schema}.related_documents")
-        cursor.execute(f"UPDATE {schema}.documents SET related_count = 0, related_docs_count = 0, related_to = NULL")
-        conn.commit()
-        log_create(cursor, schema, 'system', 'success', '✅ Старые связи очищены')
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        log_create(cursor, schema, 'system', 'warning', f'⚠️ Не удалось очистить старые связи: {str(e)[:200]}. Продолжаем без очистки...')
-        conn.commit()
+    RELATED_KEYWORDS = [
+        r'в\s+соответствии\s+с', r'на\s+основании', r'руководствуясь',
+        r'в\s+целях', r'согласно', r'во\s+исполнение'
+    ]
     
-    # Получаем документы для обработки (запускаем поиск связей в файлах docx)
+    DOCUMENT_PATTERNS = [
+        (r'от\s+(\d{2}\.\d{2}\.\d{4})\s+г(?:ода)?\.?\s+№\s*(\d+)', 'date_first'),
+        (r'от\s+(\d{2}\.\d{2}\.\d{4})\s+г(?:ода)?\.?\s+N\s*(\d+)', 'date_first'),
+        (r'постановлени[ея]\s+№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})', 'number_first'),
+        (r'постановлени[ея]\s+N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})', 'number_first'),
+        (r'№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})', 'number_first'),
+        (r'N\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})', 'number_first'),
+    ]
+    
+    EXCLUSION_PHRASES = [
+        r'правительств[ао]\s+смоленской\s+области',
+        r'администраци[ия]\s+смоленской\s+области',
+        r'правительств[ао]\s+российской\s+федерации',
+        r'правительств[ао]\s+рф',
+    ]
+    
+    # НЕ удаляем старые связи - обрабатываем только необработанные документы
+    
+    # Получаем документы БЕЗ связей (еще не обработанные)
     cursor.execute(f"""
         SELECT id, title, document_number, document_date, section, file_cdn_url
         FROM {schema}.documents
         WHERE file_cdn_url IS NOT NULL
           AND (is_phantom IS NULL OR is_phantom = FALSE)
-          AND file_cdn_url LIKE '%.docx'
+          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.doc' OR file_cdn_url LIKE '%.pdf')
+          AND NOT EXISTS (
+              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = id
+          )
         ORDER BY document_date DESC NULLS LAST
-        LIMIT 100
+        LIMIT 50
     """)
     documents = cursor.fetchall()
     
     total_docs = len(documents)
-    log_create(cursor, schema, 'system', 'info', f'📊 Обрабатываем {total_docs} документов docx...')
+    log_create(cursor, schema, 'system', 'info', f'📊 Обрабатываем {total_docs} документов...')
     conn.commit()
     
     total_versions = 0
     total_related = 0
+    total_phantoms = 0
+    processed = 0
     
-    # Упрощенная логика: ищем связи только по заголовкам с новыми ключевыми словами
     for doc in documents:
-        title = doc['title'].lower() if doc['title'] else ''
-        
-        # ВЕРСИИ: внесении изменений, утратившим силу, отменить
-        version_keywords = ['внесении изменений', 'утратившим силу', 'отменить', 'признать утратившим']
-        is_version = any(kw in title for kw in version_keywords)
-        
-        # СВЯЗАННЫЕ: в соответствии с, на основании, руководствуясь
-        related_keywords = ['в соответствии с', 'на основании', 'руководствуясь']
-        is_related = any(kw in title for kw in related_keywords)
-        
-        # Ищем упоминания номеров и дат
-        ref_pattern = r'№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})'
-        matches = re.findall(ref_pattern, title)
-        
-        for ref_num, ref_date_str in matches:
-            # Конвертируем дату
-            date_parts = ref_date_str.split('.')
-            if len(date_parts) == 3:
-                ref_date = f"{date_parts[2]}-{date_parts[1]}-{date_parts[0]}"
-                
-                # Ищем документ
+        try:
+            # Скачиваем файл
+            response = requests.get(doc['file_cdn_url'], timeout=30)
+            if response.status_code != 200:
+                continue
+            
+            file_bytes = response.content
+            file_ext = doc['file_cdn_url'].split('.')[-1].lower()
+            
+            # Парсим файл
+            text = ""
+            if file_ext == 'docx':
+                try:
+                    from docx import Document
+                    from io import BytesIO
+                    docx_doc = Document(BytesIO(file_bytes))
+                    for i, para in enumerate(docx_doc.paragraphs):
+                        if i >= 25:
+                            break
+                        text += para.text + "\n"
+                except:
+                    continue
+            elif file_ext == 'doc':
+                try:
+                    text = file_bytes.decode('cp1251', errors='ignore')
+                    text = ''.join(c if c.isprintable() or c in '\n\r\t' else ' ' for c in text)
+                    text = text[:5000]  # Первые 5000 символов
+                except:
+                    continue
+            elif file_ext == 'pdf':
+                try:
+                    import PyPDF2
+                    from io import BytesIO
+                    pdf = PyPDF2.PdfReader(BytesIO(file_bytes))
+                    for i in range(min(3, len(pdf.pages))):
+                        text += pdf.pages[i].extract_text() + "\n"
+                except:
+                    continue
+            
+            if not text:
+                continue
+            
+            # Ищем ВЕРСИИ
+            version_refs = []
+            for keyword_pattern in VERSION_KEYWORDS:
+                for match in re.finditer(keyword_pattern, text, re.IGNORECASE):
+                    start_pos = max(0, match.start() - 200)
+                    end_pos = min(len(text), match.end() + 300)
+                    context = text[start_pos:end_pos]
+                    
+                    for pattern, order in DOCUMENT_PATTERNS:
+                        for ref_match in re.finditer(pattern, context, re.IGNORECASE):
+                            try:
+                                if order == 'date_first':
+                                    date_str, number = ref_match.group(1), ref_match.group(2)
+                                else:
+                                    number, date_str = ref_match.group(1), ref_match.group(2)
+                                
+                                # Валидация
+                                if len(number) > 5 or not number.isdigit():
+                                    continue
+                                
+                                parts = date_str.split('.')
+                                if len(parts) != 3:
+                                    continue
+                                
+                                ref_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                                version_refs.append((number, ref_date))
+                            except:
+                                continue
+            
+            # Ищем СВЯЗАННЫЕ
+            related_refs = []
+            for keyword_pattern in RELATED_KEYWORDS:
+                for match in re.finditer(keyword_pattern, text, re.IGNORECASE):
+                    start_pos = max(0, match.start() - 50)
+                    end_pos = min(len(text), match.end() + 500)
+                    context = text[start_pos:end_pos]
+                    
+                    for pattern, order in DOCUMENT_PATTERNS:
+                        for ref_match in re.finditer(pattern, context, re.IGNORECASE):
+                            try:
+                                if order == 'date_first':
+                                    date_str, number = ref_match.group(1), ref_match.group(2)
+                                else:
+                                    number, date_str = ref_match.group(1), ref_match.group(2)
+                                
+                                if len(number) > 5 or not number.isdigit():
+                                    continue
+                                
+                                parts = date_str.split('.')
+                                if len(parts) != 3:
+                                    continue
+                                
+                                ref_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                                related_refs.append((number, ref_date))
+                            except:
+                                continue
+            
+            # Убираем дубликаты
+            version_refs = list(set(version_refs))
+            related_refs = list(set(related_refs))
+            
+            # Исключаем из related те что в versions
+            version_keys = set(version_refs)
+            related_refs = [r for r in related_refs if r not in version_keys]
+            
+            # Создаем связи ВЕРСИЙ
+            for ref_num, ref_date in version_refs:
                 cursor.execute(f"""
                     SELECT id FROM {schema}.documents
                     WHERE document_number = %s AND document_date = %s AND id != %s
@@ -1525,60 +1638,59 @@ def find_document_relations(conn, schema: str) -> dict:
                 
                 target_doc = cursor.fetchone()
                 if target_doc:
-                    if is_version:
-                        # Проверяем существует ли связь
+                    cursor.execute(f"""
+                        SELECT 1 FROM {schema}.document_relations
+                        WHERE source_document_id = %s AND target_document_id = %s
+                    """, (doc['id'], target_doc['id']))
+                    if not cursor.fetchone():
                         cursor.execute(f"""
-                            SELECT 1 FROM {schema}.document_relations
-                            WHERE source_document_id = %s AND target_document_id = %s
+                            INSERT INTO {schema}.document_relations 
+                            (source_document_id, target_document_id, relation_type)
+                            VALUES (%s, %s, 'previous_version')
                         """, (doc['id'], target_doc['id']))
-                        if not cursor.fetchone():
-                            cursor.execute(f"""
-                                INSERT INTO {schema}.document_relations 
-                                (source_document_id, target_document_id, relation_type)
-                                VALUES (%s, %s, 'previous_version')
-                            """, (doc['id'], target_doc['id']))
-                            total_versions += 1
-                    elif is_related:
-                        # Проверяем существует ли связь
+                        total_versions += 1
+            
+            # Создаем связи СВЯЗАННЫХ
+            for ref_num, ref_date in related_refs:
+                cursor.execute(f"""
+                    SELECT id FROM {schema}.documents
+                    WHERE document_number = %s AND document_date = %s AND id != %s
+                    LIMIT 1
+                """, (ref_num, ref_date, doc['id']))
+                
+                target_doc = cursor.fetchone()
+                if target_doc:
+                    cursor.execute(f"""
+                        SELECT 1 FROM {schema}.related_documents
+                        WHERE source_document_id = %s AND related_document_id = %s
+                    """, (doc['id'], target_doc['id']))
+                    if not cursor.fetchone():
                         cursor.execute(f"""
-                            SELECT 1 FROM {schema}.related_documents
-                            WHERE source_document_id = %s AND related_document_id = %s
-                        """, (doc['id'], target_doc['id']))
-                        if not cursor.fetchone():
-                            cursor.execute(f"""
-                                INSERT INTO {schema}.related_documents 
-                                (source_document_id, related_document_id, relation_type, context)
-                                VALUES (%s, %s, 'reference', %s)
-                            """, (doc['id'], target_doc['id'], title[:200]))
-                            total_related += 1
-        
-        if (documents.index(doc) + 1) % 25 == 0:
-            conn.commit()
-            log_create(cursor, schema, 'system', 'info', 
-                f'📦 Обработано: {documents.index(doc)+1}/{total_docs} | Версий: {total_versions} | Связанных: {total_related}')
-            conn.commit()
+                            INSERT INTO {schema}.related_documents 
+                            (source_document_id, related_document_id, relation_type, context)
+                            VALUES (%s, %s, 'reference', %s)
+                        """, (doc['id'], target_doc['id'], text[:200]))
+                        total_related += 1
+            
+            processed += 1
+            if processed % 50 == 0:
+                conn.commit()
+                log_create(cursor, schema, 'system', 'info', 
+                    f'📦 {processed}/{total_docs} | Версий: {total_versions} | Связанных: {total_related}')
+                conn.commit()
+                
+        except Exception as e:
+            continue
     
-    # Обновляем счетчики (если колонки существуют)
-    try:
-        cursor.execute(f"""
-            UPDATE {schema}.documents d
-            SET related_docs_count = (
-                SELECT COUNT(*) FROM {schema}.related_documents rd
-                WHERE rd.source_document_id = d.id
-            )
-        """)
-        conn.commit()
-    except:
-        conn.rollback()
-        pass  # Колонка может не существовать
+    conn.commit()
     
     duration_ms = int((time.time() - t_start) * 1000)
     
-    summary = f"""🔗 ПОИСК СВЯЗЕЙ ЗАВЕРШЁН (v2.1 встроенная логика)
+    summary = f"""🔗 ПОИСК СВЯЗЕЙ ЗАВЕРШЁН (v2.2 полная логика)
 
-📊 Обработано документов: {total_docs}
-📎 Связей-версий создано: {total_versions}
-🔗 Связанных документов: {total_related}
+📊 Обработано: {processed}/{total_docs}
+📎 Версий: {total_versions}
+🔗 Связанных: {total_related}
 ⏱ Время: {duration_ms}мс"""
     
     log_create(cursor, schema, 'system', 'success', summary)
@@ -1587,7 +1699,7 @@ def find_document_relations(conn, schema: str) -> dict:
     cursor.close()
     return {
         'status': 'completed',
-        'total_processed': total_docs,
+        'total_processed': processed,
         'versions_created': total_versions,
         'related_created': total_related,
         'duration_ms': duration_ms
