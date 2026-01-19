@@ -32,8 +32,11 @@ export default function LinkFinder() {
       
       const result = await response.json();
       
+      console.log('LinkFinder: API response', result);
+      
       if (result.session_id) {
         setSessionId(result.session_id);
+        console.log('LinkFinder: sessionId set to', result.session_id);
       }
 
       setStats({

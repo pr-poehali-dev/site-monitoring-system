@@ -37,9 +37,14 @@ export function LinkFinderLogs({ sessionId, autoRefresh = false }: LinkFinderLog
       const response = await fetch(`${API_BASE_URL}?${params}`);
       const data = await response.json();
 
+      console.log('LinkFinderLogs: API request', `${API_BASE_URL}?${params}`);
+      console.log('LinkFinderLogs: API response', data);
+
       if (data.logs) {
         setLogs(data.logs);
         setTotal(data.total);
+      } else {
+        console.error('LinkFinderLogs: No logs in response', data);
       }
     } catch (error) {
       console.error('Ошибка загрузки логов:', error);
