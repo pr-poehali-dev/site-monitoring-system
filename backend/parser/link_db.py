@@ -30,46 +30,34 @@ def find_document_in_db(cursor, schema: str, number: str, date_str: str) -> Opti
 
 
 def create_phantom_document(cursor, schema: str, number: str, date_str: str) -> int:
-    """Создать фантомный документ"""
-    try:
-        date_obj = datetime.strptime(date_str, '%d.%m.%Y').date()
-        
-        # Сначала проверяем, может такой документ уже есть
-        cursor.execute(f"""
-            SELECT id FROM {schema}.documents 
-            WHERE document_number = %s AND document_date = %s
-        """, (number, date_obj))
-        existing = cursor.fetchone()
-        
-        if existing:
-            return existing['id']
-        
-        # Если нет - создаём фантом
-        cursor.execute(f"""
+    """Создать фантомный документ или вернуть существующий"""
+    date_obj = datetime.strptime(date_str, '%d.%m.%Y').date()
+    
+    # Используем INSERT ... ON CONFLICT для атомарного создания/получения ID
+    cursor.execute(f"""
+        WITH inserted AS (
             INSERT INTO {schema}.documents 
             (title, document_number, document_date, url, section, is_phantom)
             VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (document_number, document_date) DO NOTHING
             RETURNING id
-        """, (
-            f'Постановление №{number} от {date_str}',
-            number,
-            date_obj,
-            '',
-            'external',
-            True
-        ))
-        return cursor.fetchone()['id']
-    except Exception as e:
-        # Если ошибка unique constraint - пробуем найти существующий документ
-        if 'unique constraint' in str(e).lower() or 'duplicate key' in str(e).lower():
-            cursor.execute(f"""
-                SELECT id FROM {schema}.documents 
-                WHERE document_number = %s AND document_date = %s
-            """, (number, date_obj))
-            existing = cursor.fetchone()
-            if existing:
-                return existing['id']
-        raise Exception(f'Не удалось создать фантом: {str(e)}')
+        )
+        SELECT id FROM inserted
+        UNION ALL
+        SELECT id FROM {schema}.documents 
+        WHERE document_number = %s AND document_date = %s
+        LIMIT 1
+    """, (
+        f'Постановление №{number} от {date_str}',
+        number,
+        date_obj,
+        '',
+        'external',
+        True,
+        number,
+        date_obj
+    ))
+    return cursor.fetchone()['id']
 
 
 def check_existing_link(cursor, schema: str, source_id: int, target_id: int, 
