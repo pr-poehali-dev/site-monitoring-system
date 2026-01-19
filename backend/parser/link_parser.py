@@ -17,7 +17,7 @@ def download_file(url: str, timeout: int = 30) -> Tuple[Optional[bytes], str]:
 
 
 def parse_docx(content: bytes) -> Tuple[Optional[str], Optional[dict], str]:
-    """Парсинг DOCX файла"""
+    """Парсинг DOCX/DOC файла"""
     try:
         doc = DocxDocument(BytesIO(content))
         paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -29,7 +29,11 @@ def parse_docx(content: bytes) -> Tuple[Optional[str], Optional[dict], str]:
         }
         return text, stats, ''
     except Exception as e:
-        return None, None, str(e)
+        # python-docx не поддерживает старый формат .doc
+        error_msg = str(e)
+        if 'not a zip file' in error_msg.lower() or 'bad magic number' in error_msg.lower():
+            return None, None, 'Формат .doc не поддерживается (используйте .docx)'
+        return None, None, error_msg
 
 
 def parse_pdf(content: bytes) -> Tuple[Optional[str], Optional[dict], str]:

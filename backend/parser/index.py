@@ -79,7 +79,7 @@ def find_all_relations(cursor, conn, schema: str, auto_loop: bool = False, itera
         INNER JOIN {schema}.document_files df ON d.id = df.document_id
         WHERE df.file_cdn_url IS NOT NULL 
           AND df.file_cdn_url != ''
-          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
+          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf' OR df.file_cdn_url LIKE '%.doc')
           AND EXISTS (
               SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
               UNION
@@ -95,7 +95,7 @@ def find_all_relations(cursor, conn, schema: str, auto_loop: bool = False, itera
         INNER JOIN {schema}.document_files df ON d.id = df.document_id
         WHERE df.file_cdn_url IS NOT NULL 
           AND df.file_cdn_url != ''
-          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
+          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf' OR df.file_cdn_url LIKE '%.doc')
     """)
     total_documents = cursor.fetchone()['total']
     remaining = total_documents - already_processed
@@ -151,12 +151,13 @@ def find_all_relations(cursor, conn, schema: str, auto_loop: bool = False, itera
                CASE 
                    WHEN df.file_cdn_url LIKE '%.docx' THEN 'docx'
                    WHEN df.file_cdn_url LIKE '%.pdf' THEN 'pdf'
+                   WHEN df.file_cdn_url LIKE '%.doc' THEN 'doc'
                END as format
         FROM {schema}.documents d
         INNER JOIN {schema}.document_files df ON d.id = df.document_id
         WHERE df.file_cdn_url IS NOT NULL 
           AND df.file_cdn_url != ''
-          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
+          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf' OR df.file_cdn_url LIKE '%.doc')
           AND NOT EXISTS (
               SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
               UNION
@@ -213,7 +214,7 @@ def find_all_relations(cursor, conn, schema: str, auto_loop: bool = False, itera
         INNER JOIN {schema}.document_files df ON d.id = df.document_id
         WHERE df.file_cdn_url IS NOT NULL 
           AND df.file_cdn_url != ''
-          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
+          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf' OR df.file_cdn_url LIKE '%.doc')
           AND NOT EXISTS (
               SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
               UNION

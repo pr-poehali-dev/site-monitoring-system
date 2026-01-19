@@ -95,7 +95,7 @@ def process_single_document(cursor, conn, schema: str, session_id: str, doc: dic
     
     # ЭТАП 2: Парсинг файла
     t2 = time.time()
-    if file_format == 'docx':
+    if file_format in ('docx', 'doc'):
         text, parse_stats, error = parse_docx(content)
     else:
         text, parse_stats, error = parse_pdf(content)
