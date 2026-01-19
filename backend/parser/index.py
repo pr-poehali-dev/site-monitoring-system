@@ -1709,7 +1709,7 @@ def find_document_relations(conn, schema: str) -> dict:
             if processed % 50 == 0:
                 conn.commit()
                 log_create(cursor, schema, 'system', 'info', 
-                    f'📦 {processed}/{total_docs} | Версий: {total_versions} | Связанных: {total_related}')
+                    f'📦 {processed}/{batch_size} | Версий: {total_versions} | Связанных: {total_related}')
                 conn.commit()
                 
         except Exception as e:
@@ -1754,27 +1754,16 @@ def find_document_relations(conn, schema: str) -> dict:
     log_create(cursor, schema, 'system', 'info', summary)
     conn.commit()
     
-    # Если ещё есть необработанные - запускаем следующий пакет
+    # Возвращаем статус для фронтенда (он сам управляет циклом)
     if remaining_now > 0:
-        log_create(cursor, schema, 'system', 'info', 
-            f'🔄 Автозапуск следующего пакета (осталось {remaining_now} документов)...')
-        conn.commit()
-        
-        try:
-            requests.post(
-                PARSER_BASE_URL,
-                json={'action': 'find_relations'},
-                timeout=2
-            )
-        except:
-            pass  # Игнорируем ошибки HTTP-вызова
-        
         cursor.close()
         return {
             'status': 'in_progress',
             'batch_processed': processed,
             'batch_versions': total_versions,
             'batch_related': total_related,
+            'total_versions': total_versions_db,
+            'total_related': total_related_db,
             'total_documents': total_all,
             'total_processed': total_processed_now,
             'remaining': remaining_now,

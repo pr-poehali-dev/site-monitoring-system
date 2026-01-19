@@ -85,7 +85,8 @@ const LinkFinderPanel = () => {
         // Обработан пакет, есть ещё
         setProcessed(data.total_processed || 0);
         setTotal(data.total_documents || 0);
-        setLinksCreated((data.batch_versions || 0) + (data.batch_related || 0));
+        // Показываем ОБЩЕЕ количество связей из БД (не накапливаем из пакетов)
+        setLinksCreated((data.total_versions || 0) + (data.total_related || 0));
         setProgress(data.progress_percent || 0);
         return data.remaining > 0; // Есть ещё документы
       } else {
