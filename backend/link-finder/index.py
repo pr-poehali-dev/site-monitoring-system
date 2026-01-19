@@ -56,14 +56,20 @@ def parse_document_references(text: str) -> list:
         r'внести\s+изменени[яе]',
         r'дополнить',
         r'изложить\s+в\s+новой\s+редакции',
+        r'в\s+редакции\s+постановлени',  # Для списков вида "(в редакции постановлений ... от DATE №NUM, от DATE №NUM)"
     ]
     
     # Ищем абзацы/предложения с ключевыми фразами
     for keyword_pattern in context_keywords:
-        # Находим все куски текста (до 500 символов) где встречается ключевая фраза
+        # Находим все куски текста где встречается ключевая фраза
         for keyword_match in re.finditer(keyword_pattern, text, re.IGNORECASE):
-            start_pos = max(0, keyword_match.start() - 200)
-            end_pos = min(len(text), keyword_match.end() + 300)
+            # Для фразы "в редакции" берем больший контекст (до 2000 символов) для захвата длинных списков
+            if 'редакции' in keyword_pattern:
+                start_pos = max(0, keyword_match.start() - 100)
+                end_pos = min(len(text), keyword_match.end() + 2000)
+            else:
+                start_pos = max(0, keyword_match.start() - 200)
+                end_pos = min(len(text), keyword_match.end() + 300)
             context_text = text[start_pos:end_pos]
             
             # В этом контексте ищем все упоминания документов
