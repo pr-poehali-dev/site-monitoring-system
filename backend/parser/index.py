@@ -42,20 +42,32 @@ import boto3
 # Добавляем текущую директорию в PYTHONPATH для импорта локальных модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Вспомогательные функции для поиска связей (встроены для избежания проблем с импортами)
-def link_log_step(cursor, schema: str, session_id: str, doc_id, doc_number, doc_date, step: str, status: str, details: dict):
-    """Записать шаг обработки в link_finding_logs"""
-    cursor.execute(f"""
-        INSERT INTO {schema}.link_finding_logs 
-        (session_id, document_id, document_number, document_date, step, status, details)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """, (session_id, doc_id, doc_number, doc_date, step, status, json.dumps(details, ensure_ascii=False)))
+# Импортируем модули для поиска связей
+try:
+    from link_processor import process_single_document
+    from link_db import log_step as link_log_step
+    LINK_MODULES_AVAILABLE = True
+except ImportError as e:
+    LINK_MODULES_AVAILABLE = False
+    import traceback
+    LINK_IMPORT_ERROR = f"{str(e)}\n{traceback.format_exc()}"
 
 
 def find_all_relations(cursor, conn, schema: str) -> dict:
-    """Базовая версия поиска связей (детальная реализация в разработке)"""
+    """Поиск связей между документами через анализ файлов"""
     import uuid
     from datetime import datetime
+    
+    # Проверяем доступность модулей
+    if not LINK_MODULES_AVAILABLE:
+        log_create(cursor, schema, 'system', 'error', 
+            f'❌ ОШИБКА ИМПОРТА МОДУЛЕЙ:\n{LINK_IMPORT_ERROR}')
+        conn.commit()
+        return {
+            'status': 'error',
+            'error': 'Модули поиска связей не загружены',
+            'details': LINK_IMPORT_ERROR
+        }
     
     session_id = str(uuid.uuid4())
     
@@ -78,20 +90,87 @@ def find_all_relations(cursor, conn, schema: str) -> dict:
     conn.commit()
     
     log_create(cursor, schema, 'system', 'info', 
-        f'🔗 ПОИСК СВЯЗЕЙ ЗАПУЩЕН (базовая версия)\n📊 Всего документов: {total_documents}')
+        f'🔗 ПОИСК СВЯЗЕЙ ЗАПУЩЕН\n📊 Всего документов: {total_documents}')
+    conn.commit()
+    
+    # Получаем первые 40 документов для обработки
+    cursor.execute(f"""
+        SELECT d.id, d.document_number as number, d.document_date as date, 
+               df.file_cdn_url as file_url,
+               CASE 
+                   WHEN df.file_cdn_url LIKE '%.docx' THEN 'docx'
+                   WHEN df.file_cdn_url LIKE '%.pdf' THEN 'pdf'
+               END as format
+        FROM {schema}.documents d
+        INNER JOIN {schema}.document_files df ON d.id = df.document_id
+        WHERE df.file_cdn_url IS NOT NULL 
+          AND df.file_cdn_url != ''
+          AND (df.file_cdn_url LIKE '%.docx' OR df.file_cdn_url LIKE '%.pdf')
+        ORDER BY d.document_date DESC NULLS LAST
+        LIMIT 40
+    """)
+    documents = cursor.fetchall()
+    
+    total_stats = {
+        'total_processed': 0,
+        'version_mentions': 0,
+        'related_mentions': 0,
+        'links_created': 0,
+        'phantoms_created': 0,
+        'errors': 0
+    }
+    
+    start_time = time.time()
+    max_duration = 25  # 25 секунд макс (запас до таймаута)
+    
+    for doc in documents:
+        # Проверка времени выполнения
+        elapsed = time.time() - start_time
+        if elapsed > max_duration:
+            log_create(cursor, schema, 'system', 'warning',
+                f'⏱ Достигнут лимит времени ({elapsed:.1f}с), обработано {total_stats["total_processed"]} документов')
+            conn.commit()
+            break
+        
+        try:
+            doc_stats = process_single_document(cursor, conn, schema, session_id, dict(doc))
+            total_stats['total_processed'] += 1
+            total_stats['version_mentions'] += doc_stats['version_mentions']
+            total_stats['related_mentions'] += doc_stats['related_mentions']
+            total_stats['links_created'] += doc_stats['links_created']
+            total_stats['phantoms_created'] += doc_stats['phantoms_created']
+            total_stats['errors'] += doc_stats['errors']
+        except Exception as e:
+            log_create(cursor, schema, 'system', 'error',
+                f'❌ Ошибка обработки документа {doc["id"]}: {str(e)[:300]}')
+            conn.commit()
+            total_stats['errors'] += 1
+    
+    duration_ms = int((time.time() - start_time) * 1000)
+    
+    link_log_step(cursor, schema, session_id, None, None, None,
+            'session_completed', 'success', {
+                'duration_ms': duration_ms,
+                'stats': total_stats
+            })
+    conn.commit()
+    
+    log_create(cursor, schema, 'system', 'success',
+        f'✅ ПОИСК СВЯЗЕЙ ЗАВЕРШЁН\n'
+        f'📊 Обработано: {total_stats["total_processed"]}/{total_documents}\n'
+        f'📎 Версий: {total_stats["version_mentions"]}\n'
+        f'🔗 Связанных: {total_stats["related_mentions"]}\n'
+        f'➕ Создано связей: {total_stats["links_created"]}\n'
+        f'👻 Фантомов: {total_stats["phantoms_created"]}\n'
+        f'⏱ Время: {duration_ms}мс')
     conn.commit()
     
     return {
         'status': 'completed',
         'session_id': session_id,
         'total_documents': total_documents,
-        'total_processed': 0,
-        'links_created': 0,
-        'version_mentions': 0,
-        'related_mentions': 0,
-        'phantoms_created': 0,
-        'errors': 0,
-        'message': 'Базовая версия работает - детальная в разработке'
+        **total_stats,
+        'duration_ms': duration_ms
     }
 
 MAX_RETRY = 3

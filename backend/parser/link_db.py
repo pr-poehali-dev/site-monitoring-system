@@ -57,12 +57,12 @@ def check_existing_link(cursor, schema: str, source_id: int, target_id: int,
     if link_type == 'VERSION':
         cursor.execute(f"""
             SELECT id, created_at FROM {schema}.document_relations
-            WHERE document_id = %s AND previous_version_id = %s
+            WHERE source_document_id = %s AND target_document_id = %s
         """, (source_id, target_id))
     else:
         cursor.execute(f"""
             SELECT id, created_at FROM {schema}.related_documents
-            WHERE document_id = %s AND related_document_id = %s AND relation_type = 'reference'
+            WHERE source_document_id = %s AND related_document_id = %s AND relation_type = 'reference'
         """, (source_id, target_id))
     
     result = cursor.fetchone()
@@ -75,17 +75,17 @@ def create_link(cursor, schema: str, source_id: int, target_id: int,
     if link_type == 'VERSION':
         cursor.execute(f"""
             INSERT INTO {schema}.document_relations 
-            (document_id, previous_version_id, relation_type, description)
-            VALUES (%s, %s, %s, %s)
+            (source_document_id, target_document_id, relation_type)
+            VALUES (%s, %s, %s)
             RETURNING id
-        """, (source_id, target_id, 'previous_version', context[:500]))
+        """, (source_id, target_id, 'previous_version'))
     else:
         cursor.execute(f"""
             INSERT INTO {schema}.related_documents
-            (document_id, related_document_id, relation_type, description)
-            VALUES (%s, %s, %s, %s)
+            (source_document_id, related_document_id, relation_type)
+            VALUES (%s, %s, %s)
             RETURNING id
-        """, (source_id, target_id, 'reference', context[:500]))
+        """, (source_id, target_id, 'reference'))
     
     return cursor.fetchone()['id']
 
@@ -101,24 +101,24 @@ def delete_link(cursor, schema: str, link_id: int, link_type: str):
 def get_existing_links(cursor, schema: str, source_id: int) -> Dict[str, List[dict]]:
     """Получить все существующие связи документа"""
     cursor.execute(f"""
-        SELECT dr.id, dr.previous_version_id as target_id, 
+        SELECT dr.id, dr.target_document_id as target_id, 
                d.document_number as number, d.document_date as date, 
-               dr.created_at, dr.description,
+               dr.created_at,
                'VERSION' as link_type
         FROM {schema}.document_relations dr
-        JOIN {schema}.documents d ON dr.previous_version_id = d.id
-        WHERE dr.document_id = %s
+        JOIN {schema}.documents d ON dr.target_document_id = d.id
+        WHERE dr.source_document_id = %s
     """, (source_id,))
     version_links = cursor.fetchall()
     
     cursor.execute(f"""
         SELECT rd.id, rd.related_document_id as target_id,
                d.document_number as number, d.document_date as date, 
-               rd.created_at, rd.description,
+               rd.created_at,
                'RELATED' as link_type
         FROM {schema}.related_documents rd
         JOIN {schema}.documents d ON rd.related_document_id = d.id
-        WHERE rd.document_id = %s AND rd.relation_type = 'reference'
+        WHERE rd.source_document_id = %s AND rd.relation_type = 'reference'
     """, (source_id,))
     related_links = cursor.fetchall()
     

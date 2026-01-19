@@ -232,7 +232,6 @@ def process_single_document(cursor, conn, schema: str, session_id: str, doc: dic
                             'target_date': str(old_link['date']),
                             'link_type': link_type,
                             'reason': 'not_found_in_new_scan',
-                            'original_context': old_link['description'][:200],
                             'original_created_at': str(old_link['created_at'])
                         })
                 conn.commit()
