@@ -1455,10 +1455,6 @@ def find_document_relations(conn, schema: str) -> dict:
     """Поиск связей между документами через анализ файлов (полная логика из link-finder)"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    t_start = time.time()
-    log_create(cursor, schema, 'system', 'info', '🔗 ПОИСК СВЯЗЕЙ: Полный анализ содержимого файлов (docx/doc/pdf)...')
-    conn.commit()
-    
     # Константы для парсинга (из link-finder)
     VERSION_KEYWORDS = [
         r'утратившим\s+силу', r'утрачива[ею]т\s+силу', r'считать\s+утратившим',
@@ -1491,9 +1487,52 @@ def find_document_relations(conn, schema: str) -> dict:
         r'правительств[ао]\s+рф',
     ]
     
-    # НЕ удаляем старые связи - обрабатываем только необработанные документы
+    # Получаем ОБЩУЮ статистику (всего документов с файлами)
+    cursor.execute(f"""
+        SELECT COUNT(*) as total
+        FROM {schema}.documents
+        WHERE file_cdn_url IS NOT NULL
+          AND (is_phantom IS NULL OR is_phantom = FALSE)
+          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.doc' OR file_cdn_url LIKE '%.pdf')
+    """)
+    total_all = cursor.fetchone()['total']
     
-    # Получаем документы БЕЗ связей (еще не обработанные)
+    # Получаем количество УЖЕ обработанных
+    cursor.execute(f"""
+        SELECT COUNT(DISTINCT d.id) as processed
+        FROM {schema}.documents d
+        WHERE file_cdn_url IS NOT NULL
+          AND (is_phantom IS NULL OR is_phantom = FALSE)
+          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.doc' OR file_cdn_url LIKE '%.pdf')
+          AND (EXISTS (
+              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
+          ) OR EXISTS (
+              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = d.id
+          ))
+    """)
+    already_processed = cursor.fetchone()['processed']
+    
+    remaining = total_all - already_processed
+    
+    t_start = time.time()
+    log_create(cursor, schema, 'system', 'info', 
+        f'🔗 ПОИСК СВЯЗЕЙ ЗАПУЩЕН\n📊 Всего документов: {total_all}\n✅ Обработано ранее: {already_processed}\n⏳ Осталось обработать: {remaining}')
+    conn.commit()
+    
+    # Если все уже обработаны - выходим
+    if remaining == 0:
+        log_create(cursor, schema, 'system', 'success', '✅ Все документы уже обработаны!')
+        conn.commit()
+        cursor.close()
+        return {
+            'status': 'completed',
+            'total_documents': total_all,
+            'already_processed': already_processed,
+            'remaining': 0,
+            'message': 'Все документы уже обработаны'
+        }
+    
+    # Получаем документы БЕЗ связей (еще не обработанные) - ПАКЕТ 50 шт
     cursor.execute(f"""
         SELECT id, title, document_number, document_date, section, file_cdn_url
         FROM {schema}.documents
@@ -1511,8 +1550,8 @@ def find_document_relations(conn, schema: str) -> dict:
     """)
     documents = cursor.fetchall()
     
-    total_docs = len(documents)
-    log_create(cursor, schema, 'system', 'info', f'📊 Обрабатываем {total_docs} документов...')
+    batch_size = len(documents)
+    log_create(cursor, schema, 'system', 'info', f'📦 Обрабатываем пакет: {batch_size} документов')
     conn.commit()
     
     total_versions = 0
@@ -1686,24 +1725,93 @@ def find_document_relations(conn, schema: str) -> dict:
     
     duration_ms = int((time.time() - t_start) * 1000)
     
-    summary = f"""🔗 ПОИСК СВЯЗЕЙ ЗАВЕРШЁН (v2.2 полная логика)
-
-📊 Обработано: {processed}/{total_docs}
-📎 Версий: {total_versions}
-🔗 Связанных: {total_related}
-⏱ Время: {duration_ms}мс"""
+    # Обновляем статистику после обработки пакета
+    cursor.execute(f"""
+        SELECT COUNT(DISTINCT d.id) as processed
+        FROM {schema}.documents d
+        WHERE file_cdn_url IS NOT NULL
+          AND (is_phantom IS NULL OR is_phantom = FALSE)
+          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.doc' OR file_cdn_url LIKE '%.pdf')
+          AND (EXISTS (
+              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
+          ) OR EXISTS (
+              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = d.id
+          ))
+    """)
+    total_processed_now = cursor.fetchone()['processed']
+    remaining_now = total_all - total_processed_now
     
-    log_create(cursor, schema, 'system', 'success', summary)
+    # Общая статистика по ВСЕМ связям (не только из текущего пакета)
+    cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.document_relations")
+    total_versions_db = cursor.fetchone()['cnt']
+    
+    cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.related_documents")
+    total_related_db = cursor.fetchone()['cnt']
+    
+    summary = f"""📦 ПАКЕТ ОБРАБОТАН
+
+📊 Обработано в пакете: {processed}/{batch_size}
+📎 Версий найдено: {total_versions}
+🔗 Связанных найдено: {total_related}
+⏱ Время: {duration_ms}мс
+
+🎯 ОБЩИЙ ПРОГРЕСС:
+✅ Обработано всего: {total_processed_now}/{total_all} ({int(total_processed_now*100/total_all)}%)
+⏳ Осталось: {remaining_now}
+📎 Всего версий в БД: {total_versions_db}
+🔗 Всего связей в БД: {total_related_db}"""
+    
+    log_create(cursor, schema, 'system', 'info', summary)
     conn.commit()
     
-    cursor.close()
-    return {
-        'status': 'completed',
-        'total_processed': processed,
-        'versions_created': total_versions,
-        'related_created': total_related,
-        'duration_ms': duration_ms
-    }
+    # Если ещё есть необработанные - запускаем следующий пакет
+    if remaining_now > 0:
+        log_create(cursor, schema, 'system', 'info', 
+            f'🔄 Автозапуск следующего пакета (осталось {remaining_now} документов)...')
+        conn.commit()
+        
+        try:
+            requests.post(
+                PARSER_BASE_URL,
+                json={'action': 'find_relations'},
+                timeout=2
+            )
+        except:
+            pass  # Игнорируем ошибки HTTP-вызова
+        
+        cursor.close()
+        return {
+            'status': 'in_progress',
+            'batch_processed': processed,
+            'batch_versions': total_versions,
+            'batch_related': total_related,
+            'total_documents': total_all,
+            'total_processed': total_processed_now,
+            'remaining': remaining_now,
+            'progress_percent': int(total_processed_now*100/total_all),
+            'duration_ms': duration_ms
+        }
+    else:
+        # Все документы обработаны!
+        final_summary = f"""🎉 ПОИСК СВЯЗЕЙ ПОЛНОСТЬЮ ЗАВЕРШЁН!
+
+📊 Обработано документов: {total_all}
+📎 Найдено версий: {total_versions_db}
+🔗 Найдено связей: {total_related_db}
+⏱ Общее время последнего пакета: {duration_ms}мс"""
+        
+        log_create(cursor, schema, 'system', 'success', final_summary)
+        conn.commit()
+        
+        cursor.close()
+        return {
+            'status': 'completed',
+            'total_documents': total_all,
+            'total_processed': total_processed_now,
+            'total_versions': total_versions_db,
+            'total_related': total_related_db,
+            'duration_ms': duration_ms
+        }
 
 
 def cors_response():
