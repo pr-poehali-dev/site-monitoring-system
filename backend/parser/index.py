@@ -1452,119 +1452,95 @@ def log_update(cursor, schema: str, lid: int, status: str, message: str, dur: in
 
 
 def find_document_relations(conn, schema: str) -> dict:
-    """Поиск связей между документами (новый документ изменяет старый)"""
+    """Поиск связей между документами через link-finder (batch обработка с новой логикой)"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     t_start = time.time()
-    log_create(cursor, schema, 'system', 'info', '🔗 ПОИСК СВЯЗЕЙ ДОКУМЕНТОВ: Анализ заголовков...')
+    log_create(cursor, schema, 'system', 'info', '🔗 ПОИСК СВЯЗЕЙ: Запуск batch обработки через link-finder (версии + связанные документы)...')
     conn.commit()
     
-    # Паттерны для поиска связей в заголовках
-    patterns = [
-        r'О внесении изменений в постановление.*?от\s+(\d{2}\.\d{2}\.\d{4})\s*г?\.*\s*№\s*(\d+)',
-        r'О внесении изменений в постановление.*?№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-        r'О внесении изменений в распоряжение.*?от\s+(\d{2}\.\d{2}\.\d{4})\s*г?\.*\s*№\s*(\d+)',
-        r'О внесении изменений в распоряжение.*?№\s*(\d+)\s+от\s+(\d{2}\.\d{2}\.\d{4})',
-        r'изменений в постановление.*?(\d{2}\.\d{2}\.\d{4}).*?№\s*(\d+)',
-        r'изменений в распоряжение.*?(\d{2}\.\d{2}\.\d{4}).*?№\s*(\d+)'
-    ]
+    # Получаем link-finder URL
+    link_finder_url = 'https://functions.poehali.dev/b3a6dc7e-b4b9-4ae4-9be9-5d5ba88c3cb5'
     
-    # Получаем все документы с упоминанием изменений в заголовке
+    total_processed = 0
+    total_versions = 0
+    total_related = 0
+    total_phantoms = 0
+    batch_limit = 50  # Обрабатываем по 50 документов за раз
+    
+    # Получаем общее количество документов
     cursor.execute(f"""
-        SELECT id, title, document_number, document_date, section
+        SELECT COUNT(*) as total
         FROM {schema}.documents
-        WHERE (title ILIKE '%внесении изменений%' OR title ILIKE '%изменений в%')
-        AND related_to IS NULL
-        ORDER BY document_date DESC
+        WHERE file_cdn_url IS NOT NULL
+          AND (is_phantom IS NULL OR is_phantom = FALSE)
+          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.pdf' OR file_cdn_url LIKE '%.doc')
     """)
-    candidates = cursor.fetchall()
+    total_docs = cursor.fetchone()['total']
     
-    found_relations = 0
-    not_found = []
-    
-    for doc in candidates:
-        found = False
-        
-        for pattern in patterns:
-            match = re.search(pattern, doc['title'], re.IGNORECASE)
-            if match:
-                # Извлекаем номер и дату из заголовка
-                groups = match.groups()
-                if len(groups) == 2:
-                    # Проверяем порядок: дата+номер или номер+дата
-                    if '.' in groups[0]:  # Первая группа - дата
-                        ref_date_str, ref_num = groups[0], groups[1]
-                    else:  # Первая группа - номер
-                        ref_num, ref_date_str = groups[0], groups[1]
-                    
-                    # Конвертируем дату в формат YYYY-MM-DD
-                    date_parts = ref_date_str.split('.')
-                    if len(date_parts) == 3:
-                        ref_date = f"{date_parts[2]}-{date_parts[1]}-{date_parts[0]}"
-                        
-                        # Ищем документ с таким номером и датой
-                        cursor.execute(f"""
-                            SELECT id, title
-                            FROM {schema}.documents
-                            WHERE document_number = %s 
-                            AND document_date = %s
-                            AND section = %s
-                            AND id != %s
-                            LIMIT 1
-                        """, (ref_num, ref_date, doc['section'], doc['id']))
-                        
-                        original_doc = cursor.fetchone()
-                        
-                        if original_doc:
-                            # Устанавливаем связь
-                            cursor.execute(f"""
-                                UPDATE {schema}.documents
-                                SET related_to = %s
-                                WHERE id = %s
-                            """, (original_doc['id'], doc['id']))
-                            
-                            # Помечаем оригинальный документ как неактуальный
-                            cursor.execute(f"""
-                                UPDATE {schema}.documents
-                                SET is_actual = FALSE
-                                WHERE id = %s
-                            """, (original_doc['id'],))
-                            
-                            found_relations += 1
-                            found = True
-                            log_create(cursor, schema, 'system', 'success', 
-                                f'✅ Связь найдена: {doc["title"][:80]}... → №{ref_num} от {ref_date_str}')
-                            conn.commit()
-                            break
-        
-        if not found:
-            not_found.append(doc['title'][:100])
-    
-    # Пересчитываем количество версий для всех документов
-    cursor.execute(f"""
-        UPDATE {schema}.documents d
-        SET related_count = (
-            SELECT COUNT(*)
-            FROM {schema}.documents d2
-            WHERE d2.related_to = d.id
-        )
-        WHERE id IN (
-            SELECT DISTINCT related_to
-            FROM {schema}.documents
-            WHERE related_to IS NOT NULL
-        )
-    """)
+    log_create(cursor, schema, 'system', 'info', f'📊 Всего документов для обработки: {total_docs}')
     conn.commit()
+    
+    # Запускаем batch обработку в цикле
+    while True:
+        try:
+            # Вызываем link-finder в batch режиме
+            response = requests.post(
+                link_finder_url,
+                json={'batch_mode': True, 'limit': batch_limit},
+                headers={'Content-Type': 'application/json'},
+                timeout=60
+            )
+            
+            if response.status_code != 200:
+                log_create(cursor, schema, 'system', 'error', 
+                    f'❌ Ошибка link-finder: HTTP {response.status_code}')
+                conn.commit()
+                break
+            
+            result = response.json()
+            processed = result.get('processed', 0)
+            
+            if processed == 0:
+                log_create(cursor, schema, 'system', 'success', 
+                    '✅ Все документы обработаны!')
+                conn.commit()
+                break
+            
+            # Собираем статистику
+            for res in result.get('results', []):
+                total_processed += 1
+                total_versions += res.get('versions_created', 0)
+                total_related += res.get('related_created', 0)
+                total_phantoms += res.get('phantoms_created', 0)
+            
+            log_create(cursor, schema, 'system', 'info', 
+                f'📦 Обработано: {total_processed}/{total_docs} | Версий: {total_versions} | Связанных: {total_related} | Фантомов: {total_phantoms}')
+            conn.commit()
+            
+            # Если обработали меньше чем лимит - значит закончились документы
+            if processed < batch_limit:
+                break
+                
+        except requests.Timeout:
+            log_create(cursor, schema, 'system', 'warning', 
+                '⏱ Таймаут link-finder. Продолжаем со следующего батча...')
+            conn.commit()
+        except Exception as e:
+            log_create(cursor, schema, 'system', 'error', 
+                f'❌ Ошибка при вызове link-finder: {str(e)[:200]}')
+            conn.commit()
+            break
     
     duration_ms = int((time.time() - t_start) * 1000)
     
-    summary = f"""🔗 ПОИСК СВЯЗЕЙ ЗАВЕРШЁН
+    summary = f"""🔗 ПОИСК СВЯЗЕЙ ЗАВЕРШЁН (v2.0)
 
-✅ Найдено связей: {found_relations}
-❌ Не найдено: {len(not_found)}
-⏱ Время: {duration_ms}мс
-
-Проверено документов: {len(candidates)}"""
+📊 Обработано документов: {total_processed}
+📎 Связей-версий создано: {total_versions}
+🔗 Связанных документов: {total_related}
+👻 Фантомов создано: {total_phantoms}
+⏱ Время: {duration_ms}мс"""
     
     log_create(cursor, schema, 'system', 'success', summary)
     conn.commit()
@@ -1572,10 +1548,10 @@ def find_document_relations(conn, schema: str) -> dict:
     cursor.close()
     return {
         'status': 'completed',
-        'found_relations': found_relations,
-        'not_found_count': len(not_found),
-        'not_found_samples': not_found[:10],
-        'total_checked': len(candidates),
+        'total_processed': total_processed,
+        'versions_created': total_versions,
+        'related_created': total_related,
+        'phantoms_created': total_phantoms,
         'duration_ms': duration_ms
     }
 

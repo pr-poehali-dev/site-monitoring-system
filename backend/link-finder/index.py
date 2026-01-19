@@ -2,7 +2,7 @@
 API для автоматического поиска связей между документами через анализ их содержимого.
 Извлекает номера и даты документов из первых страниц файлов (docx/pdf/doc).
 Различает ВЕРСИИ (изменения/отмена существующего документа) и СВЯЗАННЫЕ документы (упоминания в преамбуле).
-Версия: 2.0 (рефакторенная)
+Версия: 2.1 (полная переобработка всех документов с новой логикой)
 '''
 
 import json
@@ -30,6 +30,32 @@ def process_document(doc: dict, cursor, schema: str) -> ProcessingResult:
             status='skipped',
             error='No file URL'
         )
+    
+    try:
+        # Очищаем старые данные для повторной обработки
+        cursor.execute(f"""
+            DELETE FROM {schema}.document_relations 
+            WHERE source_document_id = %s
+        """, (doc['id'],))
+        
+        cursor.execute(f"""
+            DELETE FROM {schema}.related_documents 
+            WHERE source_document_id = %s
+        """, (doc['id'],))
+        
+        cursor.execute(f"""
+            DELETE FROM {schema}.link_finding_logs 
+            WHERE document_id = %s
+        """, (doc['id'],))
+        
+        cursor.execute(f"""
+            UPDATE {schema}.documents 
+            SET related_count = 0, related_docs_count = 0, prev_versions_count = 0
+            WHERE id = %s
+        """, (doc['id'],))
+        
+    except Exception as e:
+        pass  # Игнорируем ошибки очистки, продолжаем обработку
     
     try:
         # Скачиваем файл
@@ -171,14 +197,8 @@ def handler(event: dict, context) -> dict:
                        published_date, created_at
                 FROM {schema}.documents d
                 WHERE file_cdn_url IS NOT NULL
-                  AND related_to IS NULL
-                  AND related_count = 0
                   AND (is_phantom IS NULL OR is_phantom = FALSE)
                   AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.pdf' OR file_cdn_url LIKE '%.doc')
-                  AND NOT EXISTS (
-                      SELECT 1 FROM {schema}.link_finding_logs lfl 
-                      WHERE lfl.document_id = d.id
-                  )
                 ORDER BY 
                     COALESCE(d.document_date, d.published_date, d.created_at) DESC,
                     d.id DESC
