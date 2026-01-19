@@ -1,3 +1,31 @@
+"""
+🛡️ СИСТЕМА ЗАЩИТЫ ОТ ЗАВИСАНИЙ ПАРСЕРА
+
+Многоуровневая защита для надёжной работы в cron без ручного вмешательства:
+
+1. ⏱️ Таймаут-защита (20 сек вместо 30)
+   - parse_single_year: max_execution_time = 20 сек
+   - parse_docs: проверка каждые 20 сек
+   - Запас 10 сек до hard timeout Cloud Function
+
+2. 🔄 Автоматический сброс застрявших задач
+   - continue_parsing: сбрасывает задачи со статусом 'running' > 5 мин
+   - parse_single_year: проверка при старте, сброс если > 5 мин
+   - Логирование причины зависания
+
+3. 💾 Непрерывное сохранение прогресса
+   - Обновление parsing_state.updated_at после каждой страницы
+   - Статус 'partial' при достижении лимита времени
+   - Автоматическое продолжение с последней страницы
+
+4. 🚨 Обработка всех ошибок
+   - try/except с сохранением last_error
+   - Статус 'retry' до MAX_RETRY раз
+   - Статус 'failed' после исчерпания попыток
+
+Результат: парсер может упасть/зависнуть на любом этапе — следующий запуск автоматически подберёт и продолжит.
+"""
+
 import json
 import os
 import hashlib
@@ -17,10 +45,11 @@ INITIAL_DELAY = 1.5
 MAX_DELAY = 10.0
 MAX_ITERATIONS_PER_YEAR = 20  # Максимум 20 итераций на год (защита от бесконечных циклов)
 EMPTY_PAGES_THRESHOLD = 3  # Сколько пустых страниц подряд = конец данных
+STUCK_TASK_TIMEOUT = 300  # 5 минут = задача считается застрявшей
 PARSER_BASE_URL = os.environ.get('PARSER_URL', 'https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c')
 
 def handler(event: dict, context) -> dict:
-    """API для парсинга документов с умными повторными попытками"""
+    """API для парсинга документов с автоматическим восстановлением после сбоев"""
     method = event.get('httpMethod', 'GET')
     
     if method == 'OPTIONS':
@@ -165,8 +194,8 @@ def parse_docs(conn, schema: str, sections: list, years: list, force: bool = Fal
             for year in sorted_years:
                 try:
                     elapsed = time.time() - t_start
-                    if elapsed > 25:
-                        msg = f'⏱ ПАРСИНГ ПРИОСТАНОВЛЕН ПО ВРЕМЕНИ\nОбработано годов: {stats["years_completed"]}\nВремя: {int(elapsed*1000)}мс'
+                    if elapsed > 20:
+                        msg = f'⏱ ПАРСИНГ ПРИОСТАНОВЛЕН ПО ВРЕМЕНИ\nОбработано годов: {stats["years_completed"]}\nВремя: {int(elapsed*1000)}мс\nПричина: защита от timeout Cloud Function'
                         log_create(cursor, schema, 'system', 'warning', msg)
                         conn.commit()
                         break
@@ -237,7 +266,7 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         section_name = names.get(section, section)
         
         cursor.execute(
-            f"SELECT * FROM {schema}.parsing_state WHERE section = %s AND year = %s",
+            f"SELECT *, EXTRACT(EPOCH FROM (NOW() - updated_at)) as seconds_since_update FROM {schema}.parsing_state WHERE section = %s AND year = %s",
             (section, year)
         )
         state = cursor.fetchone()
@@ -249,6 +278,24 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
             )
             state = cursor.fetchone()
             conn.commit()
+        elif state['status'] == 'running' and state.get('seconds_since_update', 0) > STUCK_TASK_TIMEOUT:
+            # Если задача в статусе 'running' более 5 минут — это зависание, сбрасываем
+            minutes_stuck = int(state['seconds_since_update'] / 60)
+            log_create(cursor, schema, section, 'warning', 
+                f'⚠️ ОБНАРУЖЕНО ЗАВИСАНИЕ: Задача {section} {year} в статусе "running" {minutes_stuck} мин\n'
+                f'Причина: функция не завершилась корректно (timeout или crash)\n'
+                f'Действие: автоматический сброс в "pending" для повторной обработки')
+            cursor.execute(
+                f"UPDATE {schema}.parsing_state SET status = 'pending', retry_count = 0, updated_at = CURRENT_TIMESTAMP WHERE section = %s AND year = %s",
+                (section, year)
+            )
+            conn.commit()
+            # Перечитываем состояние после сброса
+            cursor.execute(
+                f"SELECT *, EXTRACT(EPOCH FROM (NOW() - updated_at)) as seconds_since_update FROM {schema}.parsing_state WHERE section = %s AND year = %s",
+                (section, year)
+            )
+            state = cursor.fetchone()
         elif state['status'] == 'completed':
             log_create(cursor, schema, section, 'info', 
                 f'✓ Раздел {section_name}, год {year} уже обработан ранее (все страницы загружены)')
@@ -313,8 +360,9 @@ def parse_single_year(conn, schema: str, section: str, year: int) -> dict:
         if year <= 2015:
             delay = 0.5
         
-        # Максимальное время работы — 25 секунд (оставляем запас до таймаута 30 сек)
-        max_execution_time = 25
+        # Максимальное время работы — 20 секунд (большой запас до таймаута Cloud Function 30 сек)
+        # КРИТИЧНО: должно быть достаточно времени для сохранения статуса в БД перед hard timeout
+        max_execution_time = 20
         
         empty_pages_count = 0  # Счётчик пустых страниц подряд
         year_fully_completed = False  # Флаг: год завершён полностью (все данные загружены)
@@ -1121,12 +1169,48 @@ def continue_parsing(conn, schema: str, auto_loop: bool = False) -> dict:
     """Автоматическое продолжение незавершённых парсингов с приоритетом"""
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
+    # 🔧 ШАГ 1: АВТОМАТИЧЕСКИЙ СБРОС ЗАСТРЯВШИХ ЗАДАЧ
+    # Находим задачи со статусом 'running' которые обновлялись более STUCK_TASK_TIMEOUT секунд назад
+    cursor.execute(f"""
+        SELECT section, year, page, status, updated_at,
+               EXTRACT(EPOCH FROM (NOW() - updated_at)) as seconds_stuck
+        FROM {schema}.parsing_state 
+        WHERE status = 'running' 
+        AND updated_at < NOW() - INTERVAL '{STUCK_TASK_TIMEOUT} seconds'
+    """)
+    stuck_tasks = cursor.fetchall()
+    
+    if stuck_tasks:
+        for task in stuck_tasks:
+            section = task['section']
+            year = task['year']
+            page = task['page']
+            minutes_stuck = int(task['seconds_stuck'] / 60)
+            
+            # Сбрасываем статус на 'pending'
+            cursor.execute(f"""
+                UPDATE {schema}.parsing_state 
+                SET status = 'pending', retry_count = 0, updated_at = CURRENT_TIMESTAMP 
+                WHERE section = %s AND year = %s
+            """, (section, year))
+            
+            log_create(cursor, schema, 'system', 'warning', 
+                f'⚠️ АВТО-СБРОС: Задача {section} {year} год застряла на {minutes_stuck} мин (страница {page})\n'
+                f'Причина: статус "running" без обновлений более 5 минут\n'
+                f'Действие: сброс в "pending" для повторной обработки')
+        
+        conn.commit()
+        log_create(cursor, schema, 'system', 'info', 
+            f'🔄 Автоматически сброшено застрявших задач: {len(stuck_tasks)}')
+        conn.commit()
+    
     # Приоритет разделов: programmy → rasporyazheniya → postanovleniya
     section_priority = {'programmy': 1, 'rasporyazheniya': 2, 'postanovleniya': 3}
     
     # Ищем незавершённые задачи с приоритетом: сначала по разделам, потом по году (от свежих)
     cursor.execute(f"""
-        SELECT section, year, page, status 
+        SELECT section, year, page, status, updated_at,
+               EXTRACT(EPOCH FROM (NOW() - updated_at)) as seconds_since_update
         FROM {schema}.parsing_state 
         WHERE status IN ('running', 'retry', 'pending', 'partial')
         ORDER BY 
