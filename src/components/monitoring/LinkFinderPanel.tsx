@@ -5,7 +5,7 @@ import { Progress } from '@/components/ui/progress';
 import Icon from '@/components/ui/icon';
 
 const API_URL = 'https://functions.poehali.dev/0d1dbd15-7762-4fb3-af49-47c960f9828b';
-const LINK_FINDER_URL = 'https://functions.poehali.dev/626aeedd-c882-4ddc-902c-fe6910133d33';
+const PARSER_URL = 'https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c';
 
 interface LinkFinderResult {
   document_id: number;
@@ -58,11 +58,11 @@ const LinkFinderPanel = () => {
 
   const processBatch = async (batchSize: number = 10): Promise<boolean> => {
     try {
-      console.log('Processing batch, size:', batchSize);
-      const response = await fetch(LINK_FINDER_URL, {
+      console.log('Processing batch via parser...');
+      const response = await fetch(PARSER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batch_mode: true, limit: batchSize })
+        body: JSON.stringify({ action: 'find_relations' })
       });
 
       if (!response.ok) {
@@ -71,21 +71,27 @@ const LinkFinderPanel = () => {
       }
 
       const data = await response.json();
-      console.log('Batch response:', data);
+      console.log('Parser response:', data);
       
-      setCurrentBatch(data.results || []);
-      setProcessed(prev => {
-        const newProcessed = prev + (data.processed || 0);
-        console.log('Processed updated:', prev, '→', newProcessed);
-        return newProcessed;
-      });
-      
-      const newLinks = (data.results || []).reduce((sum: number, r: LinkFinderResult) => 
-        sum + (r.links_created || 0), 0
-      );
-      setLinksCreated(prev => prev + newLinks);
-
-      return (data.processed || 0) > 0;
+      // Новый формат ответа от parser
+      if (data.status === 'completed') {
+        // Все документы обработаны
+        setProcessed(data.total_processed || 0);
+        setTotal(data.total_documents || 0);
+        setLinksCreated((data.total_versions || 0) + (data.total_related || 0));
+        setProgress(100);
+        return false; // Больше нет документов для обработки
+      } else if (data.status === 'in_progress') {
+        // Обработан пакет, есть ещё
+        setProcessed(data.total_processed || 0);
+        setTotal(data.total_documents || 0);
+        setLinksCreated((data.batch_versions || 0) + (data.batch_related || 0));
+        setProgress(data.progress_percent || 0);
+        return data.remaining > 0; // Есть ещё документы
+      } else {
+        // Все уже обработаны
+        return false;
+      }
     } catch (error) {
       console.error('Batch processing error:', error);
       return false;
@@ -101,36 +107,23 @@ const LinkFinderPanel = () => {
     setCurrentBatch([]);
     setProgress(0);
 
-    const totalDocs = await getTotalDocuments();
-    console.log('Total documents to process:', totalDocs);
-    setTotal(totalDocs);
-
-    if (totalDocs === 0) {
-      console.log('No documents to process');
-      setIsRunning(false);
-      return;
-    }
-
-    let processedCount = 0;
     let hasMore = true;
     
-    while (hasMore && !shouldStopRef.current && processedCount < totalDocs) {
-      console.log('Loop iteration, processedCount:', processedCount);
-      hasMore = await processBatch(10);
-      processedCount += 10;
-      
-      const currentProgress = Math.min((processedCount / totalDocs) * 100, 100);
-      console.log('Progress:', currentProgress);
-      setProgress(currentProgress);
+    // Запускаем первый пакет, который вернёт total
+    while (hasMore && !shouldStopRef.current) {
+      console.log('Processing next batch...');
+      hasMore = await processBatch(50);
 
       if (hasMore && !shouldStopRef.current) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Ждём 2 секунды перед следующим пакетом (backend автоматически запустит следующий)
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
 
     console.log('Finished! hasMore:', hasMore, 'stopped:', shouldStopRef.current);
     setIsRunning(false);
     setProgress(100);
+    loadLogs();
   };
 
   const stopLinkFinding = () => {

@@ -1497,20 +1497,16 @@ def find_document_relations(conn, schema: str) -> dict:
     """)
     total_all = cursor.fetchone()['total']
     
-    # Получаем количество УЖЕ обработанных
+    # Получаем количество УЖЕ обработанных (документы с хотя бы одной связью)
     cursor.execute(f"""
-        SELECT COUNT(DISTINCT d.id) as processed
-        FROM {schema}.documents d
-        WHERE file_cdn_url IS NOT NULL
-          AND (is_phantom IS NULL OR is_phantom = FALSE)
-          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.doc' OR file_cdn_url LIKE '%.pdf')
-          AND (EXISTS (
-              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
-          ) OR EXISTS (
-              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = d.id
-          ))
+        SELECT COUNT(DISTINCT source_document_id) as cnt
+        FROM (
+            SELECT source_document_id FROM {schema}.document_relations
+            UNION
+            SELECT source_document_id FROM {schema}.related_documents
+        ) t
     """)
-    already_processed = cursor.fetchone()['processed']
+    already_processed = cursor.fetchone()['cnt']
     
     remaining = total_all - already_processed
     
@@ -1534,18 +1530,16 @@ def find_document_relations(conn, schema: str) -> dict:
     
     # Получаем документы БЕЗ связей (еще не обработанные) - ПАКЕТ 50 шт
     cursor.execute(f"""
-        SELECT id, title, document_number, document_date, section, file_cdn_url
-        FROM {schema}.documents
-        WHERE file_cdn_url IS NOT NULL
-          AND (is_phantom IS NULL OR is_phantom = FALSE)
-          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.doc' OR file_cdn_url LIKE '%.pdf')
-          AND NOT EXISTS (
-              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = id
-          )
-          AND NOT EXISTS (
-              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = id
-          )
-        ORDER BY document_date DESC NULLS LAST
+        SELECT d.id, d.title, d.document_number, d.document_date, d.section, d.file_cdn_url
+        FROM {schema}.documents d
+        LEFT JOIN {schema}.document_relations dr ON dr.source_document_id = d.id
+        LEFT JOIN {schema}.related_documents rd ON rd.source_document_id = d.id
+        WHERE d.file_cdn_url IS NOT NULL
+          AND (d.is_phantom IS NULL OR d.is_phantom = FALSE)
+          AND (d.file_cdn_url LIKE '%.docx' OR d.file_cdn_url LIKE '%.doc' OR d.file_cdn_url LIKE '%.pdf')
+          AND dr.id IS NULL
+          AND rd.id IS NULL
+        ORDER BY d.document_date DESC NULLS LAST
         LIMIT 50
     """)
     documents = cursor.fetchall()
@@ -1727,18 +1721,14 @@ def find_document_relations(conn, schema: str) -> dict:
     
     # Обновляем статистику после обработки пакета
     cursor.execute(f"""
-        SELECT COUNT(DISTINCT d.id) as processed
-        FROM {schema}.documents d
-        WHERE file_cdn_url IS NOT NULL
-          AND (is_phantom IS NULL OR is_phantom = FALSE)
-          AND (file_cdn_url LIKE '%.docx' OR file_cdn_url LIKE '%.doc' OR file_cdn_url LIKE '%.pdf')
-          AND (EXISTS (
-              SELECT 1 FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id
-          ) OR EXISTS (
-              SELECT 1 FROM {schema}.related_documents rd WHERE rd.source_document_id = d.id
-          ))
+        SELECT COUNT(DISTINCT source_document_id) as cnt
+        FROM (
+            SELECT source_document_id FROM {schema}.document_relations
+            UNION
+            SELECT source_document_id FROM {schema}.related_documents
+        ) t
     """)
-    total_processed_now = cursor.fetchone()['processed']
+    total_processed_now = cursor.fetchone()['cnt']
     remaining_now = total_all - total_processed_now
     
     # Общая статистика по ВСЕМ связям (не только из текущего пакета)
