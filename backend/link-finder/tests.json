@@ -1,0 +1,19 @@
+{
+  "tests": [
+    {
+      "name": "Test batch mode",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "batch_mode": true,
+        "limit": 5
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "processed": "number",
+        "results": "array"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

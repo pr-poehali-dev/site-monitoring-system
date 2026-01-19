@@ -7,6 +7,7 @@ import Icon from '@/components/ui/icon';
 import ParsingProgress from './ParsingProgress';
 import FileDownloadPanel from './FileDownloadPanel';
 import MissingFilesPanel from './MissingFilesPanel';
+import LinkFinderPanel from './LinkFinderPanel';
 
 interface SettingsTabProps {
   telegramChatId: string;
@@ -40,6 +41,7 @@ const SettingsTab = ({
       <ParsingProgress autoRefresh={true} />
       <MissingFilesPanel />
       <FileDownloadPanel />
+      <LinkFinderPanel />
     <Card>
       <CardHeader>
         <CardTitle>Настройки мониторинга</CardTitle>

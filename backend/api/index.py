@@ -283,10 +283,18 @@ def get_stats(cursor, schema: str) -> dict:
     cursor.execute(f"SELECT COUNT(DISTINCT section) as total FROM {schema}.documents")
     active_sections = cursor.fetchone()['total']
     
+    cursor.execute(f"""
+        SELECT COUNT(*) as total 
+        FROM {schema}.documents
+        WHERE related_to IS NULL AND related_count = 0 AND file_cdn_url IS NOT NULL
+    """)
+    total_without_relations = cursor.fetchone()['total']
+    
     return {
         'total_documents': total_docs,
         'changes_this_week': changes_week,
-        'active_sections': active_sections
+        'active_sections': active_sections,
+        'total_without_relations': total_without_relations
     }
 
 
