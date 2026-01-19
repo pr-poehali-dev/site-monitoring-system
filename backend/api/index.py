@@ -165,10 +165,11 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
     order_sql = f"ORDER BY {sort_by} {sort_order} NULLS LAST"
     
     cursor.execute(f"""
-        SELECT id, title, url, section, published_date, document_date, document_number, 
-               file_size, file_cdn_url, changes_count, last_checked_at, created_at,
-               related_to, is_actual, related_count, is_phantom, phantom_source_id
-        FROM {schema}.documents
+        SELECT d.id, d.title, d.url, d.section, d.published_date, d.document_date, d.document_number, 
+               d.file_size, d.file_cdn_url, d.changes_count, d.last_checked_at, d.created_at,
+               d.related_to, d.is_actual, d.related_count, d.is_phantom, d.phantom_source_id,
+               (SELECT COUNT(*) FROM {schema}.document_relations dr WHERE dr.source_document_id = d.id) as prev_versions_count
+        FROM {schema}.documents d
         WHERE {where_sql}
         {order_sql}
         LIMIT %s OFFSET %s

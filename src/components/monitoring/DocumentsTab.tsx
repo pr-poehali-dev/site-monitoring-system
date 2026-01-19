@@ -225,14 +225,17 @@ const DocumentsTab = ({
                           {doc.related_count}
                         </Badge>
                       </a>
-                    ) : doc.related_to ? (
+                    ) : doc.prev_versions_count > 0 ? (
                       <a 
-                        href={`/versions/${doc.related_to}`}
+                        href={`/versions/${doc.id}`}
                         className="inline-block"
-                        title="Версия документа"
+                        title={`${doc.prev_versions_count} предыдущих версий`}
                       >
-                        <Badge variant="secondary" className="text-xs cursor-pointer hover:bg-secondary/80">
-                          ↑
+                        <Badge 
+                          variant="secondary"
+                          className="text-xs cursor-pointer hover:bg-secondary/80 transition-colors"
+                        >
+                          {doc.prev_versions_count}
                         </Badge>
                       </a>
                     ) : (
