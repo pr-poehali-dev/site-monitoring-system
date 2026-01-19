@@ -19,6 +19,7 @@ interface LinkFinderResult {
     date: string;
     title: string;
   }>;
+  not_found?: string[];
   reason?: string;
   error?: string;
 }
@@ -189,7 +190,7 @@ const LinkFinderPanel = () => {
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 <p className="text-xs font-semibold text-gray-700">Последняя обработка:</p>
                 {currentBatch.map((result, idx) => (
-                  <div key={idx} className="text-xs p-2 bg-white border rounded">
+                  <div key={idx} className="text-xs p-2 bg-white border rounded space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="font-mono text-gray-600">
                         №{result.document_number || result.document_id}
@@ -199,6 +200,11 @@ const LinkFinderPanel = () => {
                           +{result.links_created} связей
                         </span>
                       )}
+                      {result.status === 'success' && result.links_created === 0 && result.references_found! > 0 && (
+                        <span className="text-orange-600">
+                          {result.references_found} найдено, 0 связано
+                        </span>
+                      )}
                       {result.status === 'no_references' && (
                         <span className="text-gray-400">Нет упоминаний</span>
                       )}
@@ -206,6 +212,11 @@ const LinkFinderPanel = () => {
                         <span className="text-yellow-600">{result.reason}</span>
                       )}
                     </div>
+                    {result.not_found && result.not_found.length > 0 && (
+                      <div className="text-[10px] text-orange-600 truncate">
+                        Не найдено: {result.not_found.join(', ')}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -221,12 +221,13 @@ def handler(event: dict, context) -> dict:
                         'document_id': doc['id'],
                         'document_number': doc['document_number'],
                         'status': 'no_references',
-                        'links_found': 0
+                        'links_created': 0
                     })
                     continue
                 
                 links_created = 0
                 found_documents = []
+                not_found_refs = []
                 
                 for ref in references:
                     cursor.execute(f"""
@@ -262,17 +263,24 @@ def handler(event: dict, context) -> dict:
                                 'date': str(target_doc['document_date']),
                                 'title': target_doc['title']
                             })
+                    else:
+                        not_found_refs.append(f"№{ref['number']} от {ref['date']}")
                 
                 conn.commit()
                 
-                results.append({
+                result_item = {
                     'document_id': doc['id'],
                     'document_number': doc['document_number'],
                     'status': 'success',
                     'references_found': len(references),
                     'links_created': links_created,
                     'found_documents': found_documents
-                })
+                }
+                
+                if not_found_refs:
+                    result_item['not_found'] = not_found_refs[:5]
+                
+                results.append(result_item)
                 
             except Exception as e:
                 results.append({
