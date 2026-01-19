@@ -346,13 +346,14 @@ def handler(event: dict, context) -> dict:
                         if cursor.rowcount > 0:
                             links_created += 1
                             
-                            # Обновляем related_to для обратной совместимости (первая найденная связь)
+                            # Устанавливаем related_to у СТАРОГО документа (target) → указывает на новый (doc)
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_to = %s
                                 WHERE id = %s AND related_to IS NULL
-                            """, (target_doc['id'], doc['id']))
+                            """, (doc['id'], target_doc['id']))
                             
+                            # Увеличиваем счетчик новых версий у старого документа
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_count = related_count + 1
@@ -399,13 +400,14 @@ def handler(event: dict, context) -> dict:
                                 VALUES (%s, %s, 'previous_version')
                             """, (doc['id'], phantom_id))
                             
-                            # Обновляем related_to для обратной совместимости
+                            # Устанавливаем related_to у фантома → указывает на новый документ
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_to = %s
                                 WHERE id = %s AND related_to IS NULL
-                            """, (phantom_id, doc['id']))
+                            """, (doc['id'], phantom_id))
                             
+                            # Увеличиваем счетчик у фантома
                             cursor.execute(f"""
                                 UPDATE {schema}.documents
                                 SET related_count = related_count + 1
