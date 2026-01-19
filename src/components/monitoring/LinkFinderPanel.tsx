@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -30,12 +30,13 @@ const LinkFinderPanel = () => {
   const [total, setTotal] = useState(0);
   const [linksCreated, setLinksCreated] = useState(0);
   const [currentBatch, setCurrentBatch] = useState<LinkFinderResult[]>([]);
-  const [shouldStop, setShouldStop] = useState(false);
+  const shouldStopRef = useRef(false);
 
   const getTotalDocuments = async () => {
     try {
-      const response = await fetch(`${API_URL}/stats`);
+      const response = await fetch(`${API_URL}?endpoint=stats`);
       const data = await response.json();
+      console.log('Stats response:', data);
       return data.total_without_relations || 0;
     } catch (error) {
       console.error('Error getting total:', error);
@@ -45,6 +46,7 @@ const LinkFinderPanel = () => {
 
   const processBatch = async (batchSize: number = 10): Promise<boolean> => {
     try {
+      console.log('Processing batch, size:', batchSize);
       const response = await fetch(LINK_FINDER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -52,13 +54,19 @@ const LinkFinderPanel = () => {
       });
 
       if (!response.ok) {
+        console.error('Response not OK:', response.status);
         throw new Error(`HTTP ${response.status}`);
       }
 
       const data = await response.json();
+      console.log('Batch response:', data);
       
       setCurrentBatch(data.results || []);
-      setProcessed(prev => prev + (data.processed || 0));
+      setProcessed(prev => {
+        const newProcessed = prev + (data.processed || 0);
+        console.log('Processed updated:', prev, '→', newProcessed);
+        return newProcessed;
+      });
       
       const newLinks = (data.results || []).reduce((sum: number, r: LinkFinderResult) => 
         sum + (r.links_created || 0), 0
@@ -73,47 +81,56 @@ const LinkFinderPanel = () => {
   };
 
   const startLinkFinding = async () => {
+    console.log('Starting link finding...');
     setIsRunning(true);
-    setShouldStop(false);
+    shouldStopRef.current = false;
     setProcessed(0);
     setLinksCreated(0);
     setCurrentBatch([]);
+    setProgress(0);
 
     const totalDocs = await getTotalDocuments();
+    console.log('Total documents to process:', totalDocs);
     setTotal(totalDocs);
 
     if (totalDocs === 0) {
+      console.log('No documents to process');
       setIsRunning(false);
       return;
     }
 
+    let processedCount = 0;
     let hasMore = true;
-    while (hasMore && !shouldStop) {
+    
+    while (hasMore && !shouldStopRef.current && processedCount < totalDocs) {
+      console.log('Loop iteration, processedCount:', processedCount);
       hasMore = await processBatch(10);
+      processedCount += 10;
       
-      setProgress(prev => {
-        const newProgress = totalDocs > 0 ? Math.min((processed / totalDocs) * 100, 100) : 0;
-        return newProgress;
-      });
+      const currentProgress = Math.min((processedCount / totalDocs) * 100, 100);
+      console.log('Progress:', currentProgress);
+      setProgress(currentProgress);
 
-      if (hasMore) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      if (hasMore && !shouldStopRef.current) {
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
 
+    console.log('Finished! hasMore:', hasMore, 'stopped:', shouldStopRef.current);
     setIsRunning(false);
     setProgress(100);
   };
 
   const stopLinkFinding = () => {
-    setShouldStop(true);
+    shouldStopRef.current = true;
   };
 
   useEffect(() => {
-    if (total > 0 && processed > 0) {
-      setProgress((processed / total) * 100);
+    if (total > 0 && processed > 0 && isRunning) {
+      const newProgress = Math.min((processed / total) * 100, 100);
+      setProgress(newProgress);
     }
-  }, [processed, total]);
+  }, [processed, total, isRunning]);
 
   return (
     <Card>
