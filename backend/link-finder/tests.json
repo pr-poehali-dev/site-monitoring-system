@@ -1,7 +1,7 @@
 {
   "tests": [
     {
-      "name": "Test batch mode",
+      "name": "Test batch mode - full reprocessing",
       "method": "POST",
       "path": "/",
       "body": {
