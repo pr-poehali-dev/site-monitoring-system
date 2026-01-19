@@ -17,6 +17,7 @@ interface SettingsTabProps {
   handleForceReparse: () => void;
   handleCleanLogs: () => void;
   handleFullReset: () => void;
+  handleResetStuck: () => void;
   loading: boolean;
 }
 
@@ -29,6 +30,7 @@ const SettingsTab = ({
   handleForceReparse,
   handleCleanLogs,
   handleFullReset,
+  handleResetStuck,
   loading
 }: SettingsTabProps) => {
   return (
@@ -98,6 +100,16 @@ const SettingsTab = ({
               Продолжить
             </Button>
           </div>
+          
+          <Button 
+            variant="outline" 
+            className="w-full"
+            onClick={handleResetStuck}
+            disabled={loading}
+          >
+            <Icon name="Wrench" size={16} className="mr-2" />
+            Сбросить застрявшие задачи
+          </Button>
 
           <Button 
             variant="destructive" 

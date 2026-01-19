@@ -122,6 +122,7 @@ const Index = () => {
               handleForceReparse={actions.handleForceReparse}
               handleCleanLogs={actions.handleCleanLogs}
               handleFullReset={actions.handleFullReset}
+              handleResetStuck={actions.handleResetStuck}
               loading={state.loading}
             />
           </TabsContent>

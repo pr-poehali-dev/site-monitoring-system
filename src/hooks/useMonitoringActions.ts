@@ -259,6 +259,31 @@ export const useMonitoringActions = ({
     }
   };
 
+  const handleResetStuck = async () => {
+    setLoading(true);
+    
+    try {
+      const result = await apiClient.resetStuckTasks();
+      
+      toast({
+        title: '🔄 Задачи сброшены',
+        description: result.message || `Сброшено задач: ${result.reset_count}`
+      });
+
+      setTimeout(() => {
+        loadAllData();
+      }, 1000);
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось сбросить задачи',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatFileSize = (bytes: number) => {
     if (!bytes) return '-';
     const kb = bytes / 1024;
@@ -307,6 +332,7 @@ export const useMonitoringActions = ({
     handleForceReparse,
     handleCleanLogs,
     handleFullReset,
+    handleResetStuck,
     formatFileSize,
     formatDate,
     formatDateTime,

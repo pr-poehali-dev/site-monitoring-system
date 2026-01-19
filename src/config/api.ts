@@ -178,5 +178,18 @@ export const apiClient = {
     
     if (!response.ok) throw new Error('Failed to reset database');
     return response.json();
+  },
+
+  async resetStuckTasks() {
+    const response = await fetch(PARSER_BASE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'reset_stuck'
+      })
+    });
+    
+    if (!response.ok) throw new Error('Failed to reset stuck tasks');
+    return response.json();
   }
 };

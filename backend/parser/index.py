@@ -91,6 +91,12 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 conn.close()
                 return success_response(result)
+            
+            elif action == 'reset_stuck':
+                result = reset_stuck_tasks(conn, schema)
+                conn.commit()
+                conn.close()
+                return success_response(result)
         
         conn.close()
         return error_response('Неподдерживаемый метод', 400)
@@ -1201,6 +1207,49 @@ def continue_parsing(conn, schema: str, auto_loop: bool = False) -> dict:
         'page': page,
         'result': result
     }
+
+
+def reset_stuck_tasks(conn, schema: str) -> dict:
+    """Сброс застрявших задач со статусом 'running' более 10 минут"""
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Находим задачи со статусом 'running' которые обновлялись более 10 минут назад
+    cursor.execute(f"""
+        SELECT section, year, page, status, updated_at 
+        FROM {schema}.parsing_state 
+        WHERE status = 'running' 
+        AND updated_at < NOW() - INTERVAL '10 minutes'
+    """)
+    stuck_tasks = cursor.fetchall()
+    
+    if not stuck_tasks:
+        log_create(cursor, schema, 'system', 'info', '✅ Застрявших задач не обнаружено')
+        conn.commit()
+        cursor.close()
+        return {'status': 'ok', 'reset_count': 0, 'message': 'Застрявших задач нет'}
+    
+    reset_count = 0
+    for task in stuck_tasks:
+        section = task['section']
+        year = task['year']
+        page = task['page']
+        
+        # Сбрасываем статус на 'pending'
+        cursor.execute(f"""
+            UPDATE {schema}.parsing_state 
+            SET status = 'pending', retry_count = 0, updated_at = CURRENT_TIMESTAMP 
+            WHERE section = %s AND year = %s
+        """, (section, year))
+        
+        log_create(cursor, schema, 'system', 'warning', 
+            f'🔄 Сброшена застрявшая задача: {section} {year} год (страница {page})')
+        reset_count += 1
+    
+    conn.commit()
+    cursor.close()
+    
+    msg = f'Сброшено застрявших задач: {reset_count}'
+    return {'status': 'reset', 'reset_count': reset_count, 'message': msg}
 
 
 def monitor(conn, schema: str) -> dict:
