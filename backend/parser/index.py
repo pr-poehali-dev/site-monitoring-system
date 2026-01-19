@@ -1517,13 +1517,22 @@ def find_document_relations(conn, schema: str) -> dict:
     
     # Если все уже обработаны - выходим
     if remaining == 0:
+        # Получаем финальную статистику из БД
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.document_relations")
+        total_versions_db = cursor.fetchone()['cnt']
+        
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.related_documents")
+        total_related_db = cursor.fetchone()['cnt']
+        
         log_create(cursor, schema, 'system', 'success', '✅ Все документы уже обработаны!')
         conn.commit()
         cursor.close()
         return {
             'status': 'completed',
             'total_documents': total_all,
-            'already_processed': already_processed,
+            'total_processed': already_processed,
+            'total_versions': total_versions_db,
+            'total_related': total_related_db,
             'remaining': 0,
             'message': 'Все документы уже обработаны'
         }

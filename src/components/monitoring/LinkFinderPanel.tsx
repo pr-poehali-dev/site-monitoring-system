@@ -109,14 +109,28 @@ const LinkFinderPanel = () => {
     setProgress(0);
 
     let hasMore = true;
+    let emptyBatchCount = 0;
+    let prevProcessed = 0;
     
     // Запускаем первый пакет, который вернёт total
     while (hasMore && !shouldStopRef.current) {
       console.log('Processing next batch...');
       hasMore = await processBatch(50);
 
+      // Защита от бесконечного цикла: если прогресс не меняется 3 раза подряд
+      if (processed === prevProcessed) {
+        emptyBatchCount++;
+        if (emptyBatchCount >= 3) {
+          console.warn('Прогресс остановился, выходим из цикла');
+          break;
+        }
+      } else {
+        emptyBatchCount = 0;
+        prevProcessed = processed;
+      }
+
       if (hasMore && !shouldStopRef.current) {
-        // Ждём 2 секунды перед следующим пакетом (backend автоматически запустит следующий)
+        // Ждём 2 секунды перед следующим пакетом
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
