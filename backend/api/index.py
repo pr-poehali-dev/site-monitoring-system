@@ -147,7 +147,8 @@ def get_documents(cursor, schema: str, params: dict) -> dict:
     if only_actual and only_actual.lower() == 'true':
         # Показываем только документы, у которых нет более новых версий
         # (т.е. на них никто не ссылается через related_to)
-        where_clauses.append("related_count = 0")
+        # И исключаем фантомные документы (они по определению НЕ актуальные)
+        where_clauses.append("related_count = 0 AND (is_phantom IS NULL OR is_phantom = FALSE)")
     
     if only_real and only_real.lower() == 'true':
         # Показываем только реальные документы (не фантомные)
