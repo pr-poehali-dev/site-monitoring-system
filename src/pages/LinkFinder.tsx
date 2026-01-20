@@ -21,7 +21,7 @@ export default function LinkFinder() {
   });
   const isRunningRef = useRef(false);
 
-  const handleStart = async (iteration = 1) => {
+  const handleStart = async (iteration = 1, processedTotal = 0) => {
     setIsRunning(true);
     isRunningRef.current = true;
     
@@ -29,42 +29,51 @@ export default function LinkFinder() {
       const response = await fetch('https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'find_relations', auto_loop: false, iteration })
+        body: JSON.stringify({ batch_mode: true, limit: 50 })
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
       
       const result = await response.json();
       
       console.log('LinkFinder: API response', result);
       
-      if (result.session_id) {
-        setSessionId(result.session_id);
-        console.log('LinkFinder: sessionId set to', result.session_id);
+      if (iteration === 1) {
+        const sessionTime = new Date().getTime();
+        setSessionId(sessionTime.toString());
+        console.log('LinkFinder: sessionId set to', sessionTime);
       }
 
-      setStats({
-        total_documents: result.total_documents || 0,
-        remaining: result.remaining || 0,
-        iteration: result.iteration || iteration
-      });
+      const processed = result.processed || 0;
+      const newProcessedTotal = processedTotal + processed;
 
-      if (result.status === 'all_completed' || result.remaining === 0) {
+      setStats(prev => ({
+        total_documents: prev.total_documents > 0 ? prev.total_documents : newProcessedTotal + 100,
+        remaining: processed === 50 ? 50 : 0,
+        iteration
+      }));
+
+      if (processed === 0 || processed < 50) {
         setIsRunning(false);
         isRunningRef.current = false;
         toast({
           title: '🎉 Поиск связей полностью завершён!',
-          description: `Обработано: ${result.total_documents} документов`
+          description: `Обработано: ${newProcessedTotal} документов`
         });
-      } else if (result.remaining > 0 && isRunningRef.current) {
+      } else if (isRunningRef.current) {
         setTimeout(() => {
           if (isRunningRef.current) {
-            handleStart(iteration + 1);
+            handleStart(iteration + 1, newProcessedTotal);
           }
         }, 2000);
       }
     } catch (error) {
+      console.error('LinkFinder: Ошибка запуска', error);
       toast({
         title: 'Ошибка',
-        description: 'Не удалось запустить поиск связей',
+        description: error instanceof Error ? error.message : 'Не удалось запустить поиск связей',
         variant: 'destructive'
       });
       setIsRunning(false);
