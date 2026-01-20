@@ -11,7 +11,6 @@ export default function LinkFinder() {
   const { toast } = useToast();
   
   const [isRunning, setIsRunning] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [stats, setStats] = useState({
     total_documents: 0,
     remaining: 0,
@@ -35,14 +34,6 @@ export default function LinkFinder() {
       }
       
       const result = await response.json();
-      
-      console.log('LinkFinder: API response', result);
-      
-      if (iteration === 1) {
-        const sessionTime = new Date().getTime();
-        setSessionId(sessionTime.toString());
-        console.log('LinkFinder: sessionId set to', sessionTime);
-      }
 
       const processed = result.processed || 0;
       const newProcessedTotal = processedTotal + processed;
@@ -68,7 +59,6 @@ export default function LinkFinder() {
         }, 2000);
       }
     } catch (error) {
-      console.error('LinkFinder: Ошибка запуска', error);
       toast({
         title: 'Ошибка',
         description: error instanceof Error ? error.message : 'Не удалось запустить поиск связей',
@@ -139,7 +129,7 @@ export default function LinkFinder() {
             <h2 className="text-xl font-semibold">Процесс обработки</h2>
             <div className="flex gap-2">
               {!isRunning ? (
-                <Button onClick={handleStart} size="lg">
+                <Button onClick={() => handleStart()} size="lg">
                   <Icon name="Play" size={18} className="mr-2" />
                   Запустить
                 </Button>
@@ -178,8 +168,6 @@ export default function LinkFinder() {
             </>
           )}
         </Card>
-
-        {/* Логи временно отключены до синхронизации с новой структурой */}
       </div>
     </div>
   );
