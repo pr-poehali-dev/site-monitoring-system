@@ -26,7 +26,11 @@ export default function LinkFinder() {
       const response = await fetch('https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batch_mode: true, limit: 50 })
+        body: JSON.stringify({ 
+          action: 'find_all_relations',
+          auto_loop: false,
+          iteration: iteration 
+        })
       });
       
       console.log('📡 LinkFinder: Response status', response.status);

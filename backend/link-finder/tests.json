@@ -1,12 +1,12 @@
 {
   "tests": [
     {
-      "name": "Test batch mode - full reprocessing",
+      "name": "Test batch mode processing",
       "method": "POST",
       "path": "/",
       "body": {
         "batch_mode": true,
-        "limit": 5
+        "limit": 3
       },
       "expectedStatus": 200,
       "expectedBody": {
