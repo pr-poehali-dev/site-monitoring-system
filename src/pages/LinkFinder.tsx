@@ -13,6 +13,8 @@ export default function LinkFinder() {
   const [isRunning, setIsRunning] = useState(false);
   const [stats, setStats] = useState({
     processed: 0,
+    remaining: 0,
+    total: 0,
     iteration: 1
   });
   const isRunningRef = useRef(false);
@@ -27,7 +29,7 @@ export default function LinkFinder() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          action: 'find_all_relations',
+          action: 'find_relations',
           auto_loop: false,
           iteration: iteration 
         })
@@ -42,27 +44,33 @@ export default function LinkFinder() {
       const result = await response.json();
       console.log('📦 LinkFinder: Result', result);
 
-      const processed = result.processed || 0;
-      const newProcessedTotal = processedTotal + processed;
-      console.log('✅ LinkFinder: Processed', processed, 'Total now:', newProcessedTotal);
+      // Backend возвращает: status, total_processed, remaining, iteration
+      const currentProcessed = result.total_processed || 0;
+      const remaining = result.remaining || 0;
+      const status = result.status;
+
+      console.log('✅ LinkFinder: Status:', status, 'Processed:', currentProcessed, 'Remaining:', remaining);
 
       setStats({
-        processed: newProcessedTotal,
+        processed: currentProcessed,
+        remaining: remaining,
+        total: result.total_documents || 0,
         iteration
       });
 
-      // Если обработано меньше 50 — закончились документы
-      if (processed < 50) {
+      // Если статус completed или all_completed — завершаем
+      if (status === 'completed' || status === 'all_completed' || remaining === 0) {
         setIsRunning(false);
         isRunningRef.current = false;
         toast({
           title: '🎉 Поиск связей полностью завершён!',
-          description: `Обработано: ${newProcessedTotal} документов`
+          description: `Обработано: ${currentProcessed} документов`
         });
-      } else if (isRunningRef.current) {
+      } else if (isRunningRef.current && status === 'in_progress') {
+        // Продолжаем обработку через 2 секунды
         setTimeout(() => {
           if (isRunningRef.current) {
-            handleStart(iteration + 1, newProcessedTotal);
+            handleStart(iteration + 1, currentProcessed);
           }
         }, 2000);
       }
@@ -152,13 +160,18 @@ export default function LinkFinder() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">Обработано документов:</span>
-                  <span className="text-2xl font-bold text-primary">
-                    {stats.processed}
+                  <span className="font-medium">Прогресс:</span>
+                  <span className="text-muted-foreground">
+                    {stats.processed} / {stats.total} документов
                   </span>
                 </div>
-                <div className="text-center text-sm text-muted-foreground">
-                  Итерация {stats.iteration}
+                <Progress 
+                  value={stats.total > 0 ? (stats.processed / stats.total) * 100 : 0} 
+                  className="h-2" 
+                />
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Итерация {stats.iteration}</span>
+                  <span>Осталось: {stats.remaining}</span>
                 </div>
               </div>
 
@@ -166,7 +179,7 @@ export default function LinkFinder() {
                 <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                   <span className="text-sm font-medium text-blue-900">
-                    Обработка в фоне... Обрабатывается следующая партия из 50 документов
+                    Обработка в фоне... Обрабатывается следующая партия из 40 документов
                   </span>
                 </div>
               )}
