@@ -12,8 +12,7 @@ export default function LinkFinder() {
   
   const [isRunning, setIsRunning] = useState(false);
   const [stats, setStats] = useState({
-    total_documents: 0,
-    remaining: 0,
+    processed: 0,
     iteration: 1
   });
   const isRunningRef = useRef(false);
@@ -38,13 +37,13 @@ export default function LinkFinder() {
       const processed = result.processed || 0;
       const newProcessedTotal = processedTotal + processed;
 
-      setStats(prev => ({
-        total_documents: prev.total_documents > 0 ? prev.total_documents : newProcessedTotal + 100,
-        remaining: processed === 50 ? 50 : 0,
+      setStats({
+        processed: newProcessedTotal,
         iteration
-      }));
+      });
 
-      if (processed === 0 || processed < 50) {
+      // Если обработано меньше 50 — закончились документы
+      if (processed < 50) {
         setIsRunning(false);
         isRunningRef.current = false;
         toast({
@@ -78,9 +77,7 @@ export default function LinkFinder() {
     });
   };
 
-  const progress = stats.total_documents > 0 
-    ? ((stats.total_documents - stats.remaining) / stats.total_documents) * 100 
-    : 0;
+  // Прогресс не показываем точно, т.к. общее количество неизвестно
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -142,30 +139,29 @@ export default function LinkFinder() {
             </div>
           </div>
 
-          {stats.total_documents > 0 && (
-            <>
+          {stats.processed > 0 && (
+            <div className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">Прогресс:</span>
-                  <span className="text-muted-foreground">
-                    {stats.total_documents - stats.remaining} / {stats.total_documents} документов
+                  <span className="font-medium">Обработано документов:</span>
+                  <span className="text-2xl font-bold text-primary">
+                    {stats.processed}
                   </span>
                 </div>
-                <Progress value={progress} className="h-2" />
                 <div className="text-center text-sm text-muted-foreground">
-                  {progress.toFixed(1)}% • Итерация {stats.iteration}
+                  Итерация {stats.iteration}
                 </div>
               </div>
 
-              {stats.remaining > 0 && isRunning && (
+              {isRunning && (
                 <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                   <span className="text-sm font-medium text-blue-900">
-                    Обработка в фоне... Осталось: {stats.remaining} документов
+                    Обработка в фоне... Обрабатывается следующая партия из 50 документов
                   </span>
                 </div>
               )}
-            </>
+            </div>
           )}
         </Card>
       </div>
