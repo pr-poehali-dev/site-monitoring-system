@@ -1,12 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { apiClient } from '@/config/api';
 import Icon from '@/components/ui/icon';
-import { LinkFinderLogs } from '@/components/LinkFinderLogs';
 
 export default function LinkFinder() {
   const navigate = useNavigate();
@@ -181,11 +179,7 @@ export default function LinkFinder() {
           )}
         </Card>
 
-        {/* Логи */}
-        <LinkFinderLogs 
-          sessionId={sessionId} 
-          autoRefresh={isRunning}
-        />
+        {/* Логи временно отключены до синхронизации с новой структурой */}
       </div>
     </div>
   );

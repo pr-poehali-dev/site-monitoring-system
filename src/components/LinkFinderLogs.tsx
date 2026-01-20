@@ -109,8 +109,8 @@ export function LinkFinderLogs({ sessionId, autoRefresh = false }: LinkFinderLog
     if (log.step === 'system_iteration') {
       return (
         <div className="space-y-1 text-sm">
-          <div className="font-semibold text-blue-900">🔄 Итерация {details.iteration}</div>
-          <div className="text-xs text-muted-foreground">Осталось документов: {details.remaining}</div>
+          <div className="font-semibold text-blue-900">🔄 Итерация {details?.iteration || 'N/A'}</div>
+          <div className="text-xs text-muted-foreground">Осталось документов: {details?.remaining || 0}</div>
         </div>
       );
     }
@@ -118,14 +118,14 @@ export function LinkFinderLogs({ sessionId, autoRefresh = false }: LinkFinderLog
     if (log.step === 'system_iteration_completed') {
       return (
         <div className="space-y-2 text-sm">
-          <div className="font-semibold text-green-900">✅ Итерация {details.iteration} завершена</div>
+          <div className="font-semibold text-green-900">✅ Итерация {details?.iteration || 'N/A'} завершена</div>
           <div className="grid grid-cols-4 gap-2 text-xs">
-            <div><span className="text-muted-foreground">Обработано:</span> <span className="font-medium">{details.stats.total_processed}/{details.batch_size}</span></div>
-            <div><span className="text-muted-foreground">Версий:</span> <span className="font-medium">{details.stats.version_mentions}</span></div>
-            <div><span className="text-muted-foreground">Связей:</span> <span className="font-medium">{details.stats.links_created}</span></div>
-            <div><span className="text-muted-foreground">Осталось:</span> <span className="font-medium">{details.remaining}</span></div>
+            <div><span className="text-muted-foreground">Обработано:</span> <span className="font-medium">{details?.stats?.total_processed || 0}/{details?.batch_size || 0}</span></div>
+            <div><span className="text-muted-foreground">Версий:</span> <span className="font-medium">{details?.stats?.version_mentions || 0}</span></div>
+            <div><span className="text-muted-foreground">Связей:</span> <span className="font-medium">{details?.stats?.links_created || 0}</span></div>
+            <div><span className="text-muted-foreground">Осталось:</span> <span className="font-medium">{details?.remaining || 0}</span></div>
           </div>
-          <div className="text-xs text-muted-foreground">Время: {details.duration_ms}мс</div>
+          <div className="text-xs text-muted-foreground">Время: {details?.duration_ms || 0}мс</div>
         </div>
       );
     }
