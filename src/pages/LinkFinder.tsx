@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -19,15 +19,17 @@ export default function LinkFinder() {
     remaining: 0,
     iteration: 1
   });
+  const isRunningRef = useRef(false);
 
-  const handleStart = async () => {
+  const handleStart = async (iteration = 1) => {
     setIsRunning(true);
+    isRunningRef.current = true;
     
     try {
       const response = await fetch('https://functions.poehali.dev/8c4db4b8-687e-471b-add5-e4517d47764c', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'find_relations', auto_loop: true, iteration: 1 })
+        body: JSON.stringify({ action: 'find_relations', auto_loop: false, iteration })
       });
       
       const result = await response.json();
@@ -42,15 +44,22 @@ export default function LinkFinder() {
       setStats({
         total_documents: result.total_documents || 0,
         remaining: result.remaining || 0,
-        iteration: result.iteration || 1
+        iteration: result.iteration || iteration
       });
 
-      if (result.status === 'all_completed' || result.status === 'completed') {
+      if (result.status === 'all_completed' || result.remaining === 0) {
         setIsRunning(false);
+        isRunningRef.current = false;
         toast({
           title: '🎉 Поиск связей полностью завершён!',
           description: `Обработано: ${result.total_documents} документов`
         });
+      } else if (result.remaining > 0 && isRunningRef.current) {
+        setTimeout(() => {
+          if (isRunningRef.current) {
+            handleStart(iteration + 1);
+          }
+        }, 2000);
       }
     } catch (error) {
       toast({
@@ -59,11 +68,13 @@ export default function LinkFinder() {
         variant: 'destructive'
       });
       setIsRunning(false);
+      isRunningRef.current = false;
     }
   };
 
   const handleStop = () => {
     setIsRunning(false);
+    isRunningRef.current = false;
     toast({
       title: 'Остановлено',
       description: 'Поиск связей будет остановлен после текущей итерации'
