@@ -18,6 +18,7 @@ export default function LinkFinder() {
   const isRunningRef = useRef(false);
 
   const handleStart = async (iteration = 1, processedTotal = 0) => {
+    console.log('🚀 LinkFinder: Запуск итерации', iteration, 'processedTotal:', processedTotal);
     setIsRunning(true);
     isRunningRef.current = true;
     
@@ -28,14 +29,18 @@ export default function LinkFinder() {
         body: JSON.stringify({ batch_mode: true, limit: 50 })
       });
       
+      console.log('📡 LinkFinder: Response status', response.status);
+      
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
       const result = await response.json();
+      console.log('📦 LinkFinder: Result', result);
 
       const processed = result.processed || 0;
       const newProcessedTotal = processedTotal + processed;
+      console.log('✅ LinkFinder: Processed', processed, 'Total now:', newProcessedTotal);
 
       setStats({
         processed: newProcessedTotal,
